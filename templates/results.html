@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#020617">
+<title>Resultados · Quizly</title>
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<script src="/static/quizly.js?v=17" defer></script>
+</head>
+<body>
+<div class="topbar wrap">
+  <a href="/" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+  <a class="btn ghost" href="/admin">← Panel</a>
+</div>
+<div class="wrap">
+  <h2>📊 Historial de partidas</h2>
+  {% if not items %}
+  <div class="card" style="margin-top:14px"><p class="muted">Aún no hay partidas registradas. Juega una y aparecerá aquí.</p></div>
+  {% else %}
+  <div class="card" style="margin-top:14px;overflow-x:auto">
+    <table class="rt">
+      <tr><th>Fecha</th><th>Quiz</th><th>Modo</th><th>Jugadores</th><th>Ganador</th><th></th></tr>
+      {% for it in items %}
+      <tr>
+        <td class="muted">{{ it.ended_at }}</td>
+        <td><strong>{{ it.title }}</strong><div class="muted">{{ it.theme }}</div></td>
+        <td><span class="tag">{{ it.mode }}</span></td>
+        <td>{{ it.players }}</td>
+        <td>{{ it.winner }}</td>
+        <td><a class="btn blue" href="/admin/results/{{ it.id }}">Ver</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% include '_footer.html' %}
+</body>
+</html>

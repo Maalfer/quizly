@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Acceso · Quizly</title>
+<meta name="theme-color" content="#020617">
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<script src="/static/quizly.js?v=17" defer></script>
+</head>
+<body>
+<div class="center wrap">
+  <div class="card" style="width:100%;max-width:400px">
+    <a href="/" class="brand" style="justify-content:center;margin-bottom:6px"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+    <p class="muted" style="margin-bottom:16px">Acceso del profesor / administrador</p>
+    {% if error %}<div class="err">Usuario o contraseña incorrectos</div>{% endif %}
+    <form method="post" action="/login">
+      <label>Usuario</label>
+      <input name="username" autocomplete="username" required autofocus>
+      <label>Contraseña</label>
+      <input name="password" type="password" autocomplete="current-password" required>
+      <button class="btn yellow" style="width:100%;margin-top:22px" type="submit">Entrar</button>
+    </form>
+    <p class="muted" style="margin-top:18px;font-size:.85rem;text-align:center">
+      No hay registro público. El acceso es solo para administradores.</p>
+    <p style="text-align:center;margin-top:10px"><a class="muted" href="/">← Volver</a></p>
+  </div>
+</div>
+</body>
+</html>

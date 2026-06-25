@@ -1,0 +1,436 @@
+/* Quizly — identidad visual heredada de dockerlabs.es (tema terminal/hacker). */
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root{
+  /* Paleta dockerlabs.es */
+  --bg:#020617;
+  --bg2:#0f172a;
+  --panel:#0f172a;
+  --panel2:#1e293b;
+  --border:#334155;
+  --slate:#94a3b8;
+  --txt:#f9fafb;
+
+  --blue:#3b82f6;
+  --blue-light:#60a5fa;
+  --blue-dark:#1d4ed8;
+  --cyan:#22d3ee;
+  --green:#10b981;
+  --lime:#a3e635;
+  --yellow:#f59e0b;
+  --gold:#ffd700;
+  --red:#ef4444;
+  --purple:#8b5cf6;
+  --pink:#22d3ee; /* repurposed a cyan: no hay rosa en la paleta dockerlabs */
+
+  --card:rgba(15,23,42,.72);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  color:var(--txt);
+  background:radial-gradient(circle at top, #27354a 0%, #020617 60%, #020617 100%);
+  background-attachment:fixed;
+  min-height:100vh;
+}
+a{color:inherit;text-decoration:none}
+code,.mono{font-family:'Fira Code',monospace}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+.center{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center}
+.logo{font-family:'Fira Code',monospace;font-size:3rem;font-weight:700;letter-spacing:-1px}
+.logo span{color:var(--gold)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.4rem;font-family:'Fira Code',monospace;
+  cursor:pointer;transition:opacity .15s}
+.brand:hover{opacity:.8}
+.bname{white-space:nowrap}  /* mantiene "Quizly" junto (el gap flex solo separa logo/nombre) */
+
+/* Landing en columna flex: topbar + main = 100vh exacto (sin scroll fantasma) */
+body.landing{display:flex;flex-direction:column}
+.center.landing-main{min-height:0;flex:1}
+
+/* Footer estilo dockerlabs.es (copyright + iconos + ondas animadas) */
+/* Footer fundido con el fondo: degradado suave + línea fina (sin banda opaca) */
+.q-footer{position:relative;margin-top:48px;padding:26px 0 20px;
+  background:linear-gradient(to bottom,transparent 0%,rgba(2,6,23,.35) 55%,rgba(2,6,23,.55) 100%);
+  border-top:1px solid rgba(255,255,255,.06)}
+.q-footer .waves{display:none}
+.q-footer .fcontent{position:relative;z-index:2;padding:0 22px;max-width:1100px;margin:0 auto;
+  display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 16px}
+.q-footer .copyright{margin:0;font-size:.76rem;color:var(--slate)}
+.q-footer .flink{color:#cbd5e1;text-decoration:none;transition:color .2s}
+.q-footer .flink:hover{color:var(--blue-light)}
+.q-footer .ficons{display:flex;gap:14px}
+.q-footer .ficon{color:#cbd5e1;transition:transform .2s ease,color .2s ease;display:inline-flex}
+.q-footer .ficon:hover{color:var(--blue-light);transform:translateY(-2px)}
+.q-footer .ficon svg{width:18px;height:18px;fill:currentColor;display:block}
+.q-footer .ficon.gh{color:var(--gold);animation:heartbeat 3s infinite}
+.q-footer .ficon.gh:hover{animation:none;filter:drop-shadow(0 0 10px rgba(255,215,0,.7))}
+@keyframes heartbeat{0%,100%{transform:scale(1)}15%{transform:scale(1.18)}30%{transform:scale(1)}45%{transform:scale(1.12)}60%{transform:scale(1)}}
+@media(max-width:560px){.q-footer .fcontent{justify-content:center;text-align:center}.q-footer .copyright{font-size:.72rem}}
+/* En la landing flex, el footer no debe romper el alto */
+body.landing .q-footer{margin-top:0}
+
+/* ============================================================
+   TEMA CLARO  (se activa con <html class="light">)
+   ============================================================ */
+.theme-toggle{position:fixed;right:18px;bottom:18px;z-index:900;width:46px;height:46px;border-radius:50%;
+  border:1px solid var(--border);background:var(--panel2);color:var(--txt);font-size:1.25rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.35);
+  transition:transform .15s ease,background .2s}
+.theme-toggle:hover{transform:scale(1.1)}
+
+html.light{
+  --bg:#eef2f7; --bg2:#ffffff; --panel:#ffffff; --panel2:#f1f5f9;
+  --border:#d8e0ea; --slate:#566273; --txt:#0f172a;
+  --card:rgba(255,255,255,.92);
+}
+html.light body{background:radial-gradient(circle at top,#ffffff 0%,#eaf0f6 55%,#dde6f0 100%);color:#0f172a}
+html.light input,html.light select,html.light textarea{background:#ffffff;color:#0f172a;border:1px solid #cbd5e1}
+html.light select option{background:#fff}
+html.light label,html.light .field-label{color:#334155}
+html.light strong{color:#0f172a}
+html.light .muted{color:#566273}
+html.light .hero p{color:#475569}
+/* Botones legibles sobre fondo claro */
+html.light .btn{color:#1d4ed8;background:rgba(59,130,246,.10);border-color:#93c5fd}
+html.light .btn:hover{color:#fff;background:var(--blue)}
+html.light .btn.yellow{color:#9a6700;border-color:#f0c14b;background:rgba(245,158,11,.15)}
+html.light .btn.yellow:hover{color:#3a2c00;background:var(--yellow)}
+html.light .btn.green{color:#067a55;border-color:#6ee7b7;background:rgba(16,185,129,.12)}
+html.light .btn.green:hover{color:#04231a;background:var(--green)}
+html.light .btn.pink,html.light .btn.blue{color:#0e7490;border-color:#67e8f9;background:rgba(34,211,238,.12)}
+html.light .btn.pink:hover,html.light .btn.blue:hover{color:#04222a;background:var(--cyan)}
+html.light .btn.ghost{color:#0f172a;border-color:#cbd5e1;background:rgba(15,23,42,.04)}
+html.light .btn.ghost:hover{background:#e2e8f0;color:#0f172a}
+/* Acentos en dorado→ámbar oscuro para que se vean */
+html.light .pin,html.light .lb .pos,html.light .rankbox strong,html.light .numeric-val,html.light .q-footer .ficon.gh{color:#b8860b}
+html.light .lb .sc{color:#0e7490}
+/* Casillas de respuesta */
+html.light .ans.a0{color:#b91c1c} html.light .ans.a1{color:#1d4ed8}
+html.light .ans.a2{color:#92600a} html.light .ans.a3{color:#047857}
+/* Modal y editor */
+html.light .modal{background:#ffffff}
+html.light .modal-overlay{background:rgba(15,23,42,.45)}
+html.light .opt{background:#f8fafc} html.light .opt input{background:transparent}
+html.light .qtype-row .qt{color:#566273}
+/* Tablas y footer */
+html.light .q-footer{background:linear-gradient(to bottom,transparent 0%,rgba(203,213,225,.35) 55%,rgba(203,213,225,.6) 100%);border-top-color:rgba(15,23,42,.08)}
+html.light .q-footer .flink,html.light .q-footer .ficon{color:#475569}
+html.light .q-footer .flink:hover,html.light .q-footer .ficon:hover{color:var(--blue-dark)}
+html.light *::-webkit-scrollbar-track{background:#e2e8f0}
+html.light .theme-toggle{box-shadow:0 6px 18px rgba(100,116,139,.3)}
+.brand-logo{height:38px;width:38px;border-radius:50%;vertical-align:middle;display:inline-block}
+.brand-big .brand-logo{height:64px;width:64px}
+.brand-big{font-size:2rem}
+
+/* Botones — estilo terminal dockerlabs (borde + relleno al hover) */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid var(--blue);cursor:pointer;font-weight:600;font-family:'Fira Code',monospace;
+  padding:13px 26px;border-radius:10px;font-size:1rem;color:var(--blue-light);
+  background:rgba(59,130,246,.08);transition:all .15s ease;text-decoration:none;
+}
+.btn:hover{background:var(--blue);color:#fff;box-shadow:0 0 18px rgba(59,130,246,.45);transform:translateY(-1px)}
+.btn:active{transform:translateY(1px)}
+.btn.yellow{border-color:var(--yellow);color:var(--gold);background:rgba(245,158,11,.08)}
+.btn.yellow:hover{background:var(--yellow);color:#1a1205;box-shadow:0 0 18px rgba(245,158,11,.45)}
+.btn.green{border-color:var(--green);color:#5eead4;background:rgba(16,185,129,.08)}
+.btn.green:hover{background:var(--green);color:#04231a;box-shadow:0 0 18px rgba(16,185,129,.45)}
+.btn.pink,.btn.blue{border-color:var(--cyan);color:var(--cyan);background:rgba(34,211,238,.08)}
+.btn.pink:hover,.btn.blue:hover{background:var(--cyan);color:#04222a;box-shadow:0 0 18px rgba(34,211,238,.45)}
+.btn.ghost{border-color:var(--border);color:var(--txt);background:rgba(148,163,184,.07)}
+.btn.ghost:hover{background:var(--panel2);box-shadow:none;color:#fff}
+.btn.big{padding:18px 42px;font-size:1.2rem}
+.btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;transform:none}
+
+.card{background:var(--card);backdrop-filter:blur(6px);border:1px solid var(--border);
+  border-radius:14px;padding:28px}
+input,select,textarea{
+  font-family:'Fira Code',monospace;font-size:1rem;padding:13px 15px;border-radius:10px;
+  border:1px solid var(--border);width:100%;background:#0b1220;color:var(--txt);outline:none
+}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.2)}
+select option{background:#0b1220}
+label{display:block;font-weight:600;margin:14px 0 6px;text-align:left;color:#cbd5e1}
+.muted{color:var(--slate)}
+.pin{font-family:'Fira Code',monospace;font-size:2.6rem;font-weight:700;letter-spacing:8px;color:var(--gold)}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.grid{display:grid;gap:14px}
+
+/* Landing */
+.hero{max-width:760px}
+.hero h1{font-size:3.2rem;line-height:1.08;font-weight:700;margin:18px 0;font-family:'Fira Code',monospace}
+.hero p{font-size:1.2rem;color:#cbd5e1;margin-bottom:28px}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px;margin-top:50px}
+.feature{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;text-align:left}
+.feature .ico{font-size:2rem}
+.feature h3{margin:8px 0 4px;font-family:'Fira Code',monospace}
+.feature p{color:var(--slate)}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;
+  border-bottom:1px solid var(--border)}
+
+/* Avatars */
+.avatars{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:8px}
+.av{font-size:1.9rem;background:var(--panel2);border-radius:10px;padding:8px;cursor:pointer;
+  border:2px solid var(--border);text-align:center;transition:all .12s}
+.av:hover{border-color:var(--blue)}
+.av.sel{border-color:var(--gold);background:rgba(255,215,0,.15);box-shadow:0 0 14px rgba(255,215,0,.3)}
+
+/* Player chips */
+.players{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;justify-content:center}
+.chip{background:var(--panel2);border:1px solid var(--border);padding:8px 14px;border-radius:8px;
+  font-weight:600;font-family:'Fira Code',monospace;display:flex;align-items:center;gap:8px;animation:pop .25s}
+@keyframes pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+
+/* Quiz answer tiles (estilo Kahoot, paleta dockerlabs) */
+.answers{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+.ans{position:relative;border:1px solid transparent;cursor:pointer;color:#fff;font-weight:600;font-size:1.15rem;
+  padding:28px 18px;border-radius:12px;display:flex;align-items:center;gap:12px;
+  font-family:'Fira Code',monospace;transition:transform .1s,box-shadow .2s,outline .1s}
+.ans:hover{transform:translateY(-2px)}
+.ans:active{transform:translateY(1px)}
+.ans .sym{font-size:1.4rem}
+.ans.a0{background:rgba(239,68,68,.18);border-color:var(--red);color:#fca5a5}
+.ans.a1{background:rgba(59,130,246,.18);border-color:var(--blue);color:#93c5fd}
+.ans.a2{background:rgba(245,158,11,.18);border-color:var(--yellow);color:#fcd34d}
+.ans.a3{background:rgba(16,185,129,.18);border-color:var(--green);color:#6ee7b7}
+.ans.dim{opacity:.3}
+.ans.correct{outline:3px solid var(--gold);box-shadow:0 0 22px rgba(255,215,0,.4)}
+
+/* Timer */
+.timerbar{height:12px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin:14px 0}
+.timerbar>div{height:100%;background:linear-gradient(90deg,var(--green),var(--cyan));width:100%;transition:width 1s linear}
+.qbig{font-size:1.9rem;font-weight:600;margin:10px 0;font-family:'Fira Code',monospace}
+
+/* Leaderboard */
+.lb{list-style:none;margin-top:16px}
+.lb li{display:flex;align-items:center;gap:14px;background:var(--panel2);border:1px solid var(--border);
+  border-radius:10px;padding:13px 18px;margin-bottom:10px;font-weight:600;animation:slide .35s}
+@keyframes slide{from{transform:translateX(-20px);opacity:0}to{transform:none;opacity:1}}
+.lb .pos{font-size:1.3rem;width:34px;color:var(--gold);font-family:'Fira Code',monospace}
+.lb .av2{font-size:1.6rem}
+.lb .nm{flex:1}
+.lb .sc{font-size:1.2rem;color:var(--cyan);font-family:'Fira Code',monospace}
+
+/* Podium */
+.podium{display:flex;align-items:flex-end;gap:14px;justify-content:center;margin-top:30px}
+.pod{border-radius:12px 12px 0 0;padding:16px;text-align:center;width:120px;border:1px solid var(--border)}
+.pod .av3{font-size:2.4rem}
+.pod strong{font-family:'Fira Code',monospace}
+.pod.p1{height:200px;background:linear-gradient(var(--gold),#9a7b00);color:#1a1205;border-color:var(--gold)}
+.pod.p2{height:160px;background:linear-gradient(#64748b,#334155);color:#fff}
+.pod.p3{height:130px;background:linear-gradient(#b45309,#78350f);color:#fff}
+
+.qrbox{background:#fff;padding:12px;border-radius:12px;display:inline-block}
+.tag{display:inline-block;background:var(--panel2);border:1px solid var(--border);padding:3px 10px;
+  border-radius:6px;font-size:.8rem;font-weight:600;margin-left:6px;font-family:'Fira Code',monospace}
+.tag.test{border-color:var(--blue);color:var(--blue-light)}
+.tag.rellenar{border-color:var(--green);color:#6ee7b7}
+.err{background:rgba(239,68,68,.15);border:1px solid var(--red);color:#fca5a5;padding:10px 14px;
+  border-radius:8px;margin-top:10px;font-weight:600}
+.feedback{font-size:2rem;font-weight:700;margin-top:20px;font-family:'Fira Code',monospace}
+.feedback.good{color:var(--green)} .feedback.bad{color:var(--red)}
+.rankbox{font-size:1.25rem;margin:14px 0;padding:12px 18px;display:inline-block;border-radius:10px;
+  background:var(--panel2);border:1px solid var(--border);font-family:'Fira Code',monospace}
+.rankbox strong{color:var(--gold)}
+.dots{animation:blink 1.4s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:.45}50%{opacity:1}}
+
+/* Modal editor de quizzes */
+.modal-overlay{position:fixed;inset:0;background:rgba(2,6,23,.78);backdrop-filter:blur(4px);
+  display:none;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:1000;overflow-y:auto}
+.modal-overlay.open{display:flex;animation:fade .18s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.modal{background:#0b1220;border:1px solid var(--border);border-radius:16px;width:100%;max-width:720px;
+  margin:auto;box-shadow:0 24px 60px rgba(0,0,0,.6);animation:rise .22s ease;display:flex;flex-direction:column;max-height:90vh}
+@keyframes rise{from{transform:translateY(18px);opacity:0}to{transform:none;opacity:1}}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;
+  border-bottom:1px solid var(--border)}
+.modal-head h3{font-family:'Fira Code',monospace}
+.modal-body{padding:22px 24px;overflow-y:auto}
+.modal-foot{display:flex;justify-content:flex-end;gap:12px;padding:16px 24px;border-top:1px solid var(--border)}
+.modal-x{background:none;border:none;color:var(--slate);font-size:1.3rem;cursor:pointer;line-height:1;
+  padding:6px 10px;border-radius:8px}
+.modal-x:hover{background:var(--panel2);color:#fff}
+.qcard{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:14px}
+.qcard-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.qnum{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;
+  background:var(--blue);color:#fff;font-weight:700;font-family:'Fira Code',monospace}
+.btn-sm{padding:6px 12px;font-size:.85rem}
+
+/* Campos del editor — etiquetas claras */
+.field{margin-top:14px}
+.field-label{display:block;font-weight:600;color:#cbd5e1;margin-bottom:6px;font-size:.92rem}
+.field-label small{font-weight:400}
+.qcard textarea{resize:vertical;line-height:1.4}
+
+/* Opciones de respuesta con marcado de correcta */
+.opt{display:flex;align-items:center;gap:10px;margin-bottom:8px;background:#0b1220;
+  border:1px solid var(--border);border-radius:10px;padding:8px 10px;transition:all .15s}
+.opt.correct{border-color:var(--green);background:rgba(16,185,129,.1)}
+.opt input{border:none;background:transparent;padding:8px}
+.opt input:focus{box-shadow:none}
+.opt-sym{width:34px;height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  border-radius:8px;font-size:1rem;color:#fff}
+.opt-sym.a0{background:var(--red)} .opt-sym.a1{background:var(--blue)}
+.opt-sym.a2{background:var(--yellow);color:#3a2c00} .opt-sym.a3{background:var(--green);color:#04231a}
+.opt-mark{flex:0 0 auto;cursor:pointer;border:1px solid var(--border);background:var(--panel2);color:var(--slate);
+  font-family:'Fira Code',monospace;font-size:.82rem;font-weight:600;padding:8px 12px;border-radius:8px;white-space:nowrap}
+.opt-mark:hover{border-color:var(--green);color:#6ee7b7}
+.opt-mark.on{background:var(--green);color:#04231a;border-color:var(--green)}
+/* --- Pulido general / consistencia --- */
+h1,h2,h3{font-family:'Fira Code',monospace;font-weight:700;letter-spacing:-.5px}
+h2{font-size:1.6rem;margin-bottom:4px}
+h3{font-size:1.2rem}
+.card h2,.card h3{margin-top:0}
+strong{color:#fff}
+
+/* Pregunta en pantalla de juego más prominente */
+#play .qbig,#question .qbig{font-size:1.7rem;text-align:center;padding:10px 6px 4px;line-height:1.3}
+/* Input de respuesta "rellenar" del jugador: grande y centrado */
+#area>input{font-size:1.3rem;text-align:center;padding:18px}
+.answers .ans{justify-content:center;text-align:center}
+
+/* Host: PIN y enlace de unión destacados */
+#lobby .pin{margin:6px 0}
+#joinUrl{color:var(--cyan)}
+
+/* Selects/inputs del host en una fila más legible */
+.timerbar{box-shadow:inset 0 0 8px rgba(0,0,0,.4)}
+
+/* Scrollbar acorde al tema oscuro */
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:#0b1220}
+*::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
+*::-webkit-scrollbar-thumb:hover{background:var(--slate)}
+
+/* ===== Avatares con foto ===== */
+.av-img{width:1.6em;height:1.6em;border-radius:50%;object-fit:cover;vertical-align:middle;display:inline-block;border:2px solid var(--border)}
+.chip .av-img{width:26px;height:26px}
+.lb .av-img,.pod .av-img{width:42px;height:42px}
+#meAv .av-img,.meav .av-img{width:90px;height:90px;border-width:3px}
+
+/* ===== Tipos de pregunta (jugador) ===== */
+.tf{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+.tf .ans{font-size:1.4rem;padding:40px 18px}
+.multi-hint{text-align:center;margin-top:10px;color:var(--cyan)}
+.ans.sel{outline:4px solid var(--gold);outline-offset:2px;transform:translateY(-3px) scale(1.02);
+  box-shadow:0 0 24px rgba(255,215,0,.55);opacity:1!important;z-index:1}
+.ans.sel::after{content:'✓';position:absolute;top:6px;right:12px;font-size:1.25rem;font-weight:800;color:var(--gold);
+  text-shadow:0 1px 4px rgba(0,0,0,.6)}
+.ans.sel.dim{opacity:1!important}
+/* Revisión de opciones en el reveal (alumno) */
+.review{margin:6px 0 4px;pointer-events:none}
+.review .ans{padding:14px 16px;font-size:1rem;cursor:default}
+.ans.rev{opacity:.78}
+.ans.ok{outline:3px solid var(--green);outline-offset:2px;box-shadow:0 0 16px rgba(16,185,129,.45);opacity:1!important}
+.ans.bad{outline:3px solid var(--red);outline-offset:2px;box-shadow:0 0 16px rgba(239,68,68,.45);opacity:1!important}
+.ans .revtag{margin-left:auto;font-weight:800;font-size:1.2rem}
+.ans.ok .revtag{color:var(--green)} .ans.bad .revtag{color:var(--red)}
+/* Opciones con conteo en el reveal del host (proyector) */
+.hostopts{display:flex;flex-direction:column;gap:8px;margin:14px 0;text-align:left}
+.hostopt{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--border);
+  border-radius:10px;padding:10px 14px;font-family:'Fira Code',monospace;opacity:.6;transition:opacity .3s}
+.hostopt.ok{opacity:1;border-color:var(--green);box-shadow:0 0 18px rgba(16,185,129,.3)}
+.hostopt .ho-text{flex:1;font-weight:600}
+.hostopt .ho-bar{width:120px;height:8px;background:rgba(255,255,255,.08);border-radius:5px;overflow:hidden;flex:0 0 auto}
+.hostopt .ho-bar>span{display:block;height:100%;background:var(--cyan);transition:width .5s}
+.hostopt.ok .ho-bar>span{background:var(--green)}
+.hostopt .ho-cnt{min-width:48px;text-align:right;color:var(--gold);font-weight:700}
+.numeric-box{text-align:center;margin-top:20px}
+.numeric-val{font-size:3rem;font-weight:800;font-family:'Fira Code',monospace;color:var(--gold)}
+input[type=range]{width:100%;accent-color:var(--blue);height:8px;margin-top:14px}
+.order-list{list-style:none;margin-top:16px}
+.order-item{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--border);
+  border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:grab;font-weight:600;font-family:'Fira Code',monospace}
+.order-item.dragging{opacity:.5}
+.order-item .ord-n{width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 auto}
+.order-item .grip{margin-left:auto;color:var(--slate)}
+.qimg{max-width:100%;max-height:240px;border-radius:12px;margin:10px auto;display:block;border:1px solid var(--border)}
+
+/* ===== Power-up ===== */
+.powerup{margin-top:14px;text-align:center}
+.btn.boost{border-color:var(--purple);color:#c4b5fd;background:rgba(139,92,246,.12)}
+.btn.boost:hover{background:var(--purple);color:#fff;box-shadow:0 0 18px rgba(139,92,246,.5)}
+.btn.boost.armed{background:var(--purple);color:#fff;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 10px rgba(139,92,246,.4)}50%{box-shadow:0 0 26px rgba(139,92,246,.9)}}
+
+/* ===== Equipos ===== */
+.teampick{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-top:8px}
+.teamopt{border:2px solid var(--border);border-radius:12px;padding:14px;text-align:center;cursor:pointer;font-weight:700;background:var(--panel2)}
+.teamopt.sel{border-color:var(--gold);box-shadow:0 0 14px rgba(255,215,0,.3)}
+.team-badge{font-size:.78rem;padding:2px 8px;border-radius:20px;background:var(--panel2);border:1px solid var(--border);margin-left:6px}
+.teamlb li .sc{color:var(--gold)}
+
+/* ===== Distribución de respuestas (host) ===== */
+.dist{display:flex;gap:8px;align-items:flex-end;height:90px;margin:14px 0}
+.dist .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
+.dist .bar .b{width:100%;border-radius:6px 6px 0 0;min-height:4px;transition:height .5s}
+.dist .bar.a0 .b{background:var(--red)} .dist .bar.a1 .b{background:var(--blue)}
+.dist .bar.a2 .b{background:var(--yellow)} .dist .bar.a3 .b{background:var(--green)}
+
+/* ===== Modo proyector / fullscreen host ===== */
+.host-tools{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+body.projector .topbar,body.projector .host-config,body.projector #playersBox h3{display:none}
+body.projector .pin{font-size:5rem}
+body.projector #qr img,body.projector #qr canvas{width:260px!important;height:260px!important}
+.config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:10px}
+.switch{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px}
+.switch input{width:auto}
+
+/* ===== Toolbar admin / navegación ===== */
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.folder-group{margin-top:8px}
+.folder-title{font-family:'Fira Code',monospace;color:var(--cyan);margin:18px 0 8px;font-size:.95rem;text-transform:uppercase;letter-spacing:1px}
+
+/* ===== Panel IA ===== */
+.ai-panel{background:linear-gradient(135deg,rgba(139,92,246,.12),rgba(34,211,238,.08));
+  border:1px solid var(--purple);border-radius:12px;padding:16px;margin-top:6px}
+.ai-panel h4{font-family:'Fira Code',monospace;margin-bottom:8px}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);
+  border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ===== Selector de tipo de pregunta en editor ===== */
+.qtype-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.qtype-row .qt{border:1px solid var(--border);background:var(--panel2);color:var(--slate);border-radius:8px;
+  padding:7px 12px;font-size:.82rem;font-weight:600;cursor:pointer;font-family:'Fira Code',monospace}
+.qtype-row .qt.on{border-color:var(--blue);color:#fff;background:rgba(59,130,246,.2)}
+
+/* ===== Tablas de resultados ===== */
+table.rt{width:100%;border-collapse:collapse;margin-top:10px}
+table.rt th,table.rt td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)}
+table.rt th{color:var(--slate);font-family:'Fira Code',monospace;font-size:.85rem}
+table.rt tr:hover td{background:var(--panel2)}
+.statbar{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;min-width:80px}
+.statbar>div{height:100%;background:linear-gradient(90deg,var(--green),var(--cyan))}
+.mute-btn{cursor:pointer;background:var(--panel2);border:1px solid var(--border);color:var(--txt);
+  border-radius:8px;padding:8px 12px;font-size:1rem}
+
+@media(max-width:560px){
+  .answers{grid-template-columns:1fr}.hero h1{font-size:2.2rem}
+  .modal-body,.modal-head,.modal-foot{padding-left:16px;padding-right:16px}
+  .opt{flex-wrap:wrap}.opt input{width:100%;order:3}
+  .tf{grid-template-columns:1fr}
+}
+
+/* ============ ACCESIBILIDAD ============ */
+/* Foco visible para navegación con teclado (no aparece al hacer clic con ratón) */
+a:focus-visible,button:focus-visible,.btn:focus-visible,.ans:focus-visible,.av:focus-visible,
+.theme-toggle:focus-visible,.mute-btn:focus-visible,.opt-mark:focus-visible,.qt:focus-visible,
+.teamopt:focus-visible,.order-item:focus-visible,input:focus-visible,select:focus-visible,
+textarea:focus-visible,[tabindex]:focus-visible{
+  outline:3px solid var(--cyan);outline-offset:3px;border-radius:8px;
+}
+/* Respeta a quien prefiere menos movimiento: corta animaciones decorativas,
+   pero conserva transiciones funcionales como la barra de tiempo. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important}
+}
+/* Texto de "solo lectores de pantalla" (skip link, etiquetas ocultas) */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip-link{position:fixed;top:-60px;left:12px;z-index:2000;background:var(--blue);color:#fff;
+  padding:10px 16px;border-radius:8px;font-weight:700;transition:top .15s}
+.skip-link:focus{top:12px}

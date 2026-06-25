@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#020617">
+<title>Mi cuenta · Quizly</title>
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<script src="/static/quizly.js?v=17" defer></script>
+</head>
+<body>
+<div class="topbar wrap">
+  <a href="/" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+  <a class="btn ghost" href="/admin">← Panel</a>
+</div>
+<div class="wrap" style="max-width:640px">
+  <h2>⚙️ Mi cuenta</h2>
+
+  <div class="card" style="margin-top:14px">
+    <h3>🔌 Controlar Quizly desde Claude Code</h3>
+    <p class="muted">Genera un token y pégalo en tu sesión de Claude Code. Con él, Claude (o cualquier IA) tiene <strong>control total</strong>: crear/editar/borrar/duplicar quizzes, <strong>crear y dirigir partidas en directo</strong> (equipos, empezar, avanzar, terminar), ver resultados y gestionar profesores. No necesitas ninguna clave de IA en el servidor.</p>
+
+    <div id="tokenList" style="margin:12px 0">
+      {% for t in tokens %}
+      <div class="row" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:10px 0" data-t="{{ t.token }}">
+        <div><strong>{{ t.label }}</strong> <code class="muted">{{ t.token[:10] }}…</code>
+          <div class="muted" style="font-size:.8rem">creado {{ t.created_at }}{% if t.last_used %} · usado {{ t.last_used }}{% endif %}</div></div>
+        <button class="btn ghost btn-sm" onclick="delToken('{{ t.token }}')" aria-label="Revocar token">🗑 Revocar</button>
+      </div>
+      {% endfor %}
+      {% if not tokens %}<p class="muted" id="noTok">Aún no tienes tokens.</p>{% endif %}
+    </div>
+
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:2"><label>Nombre del token</label><input id="tokLabel" placeholder="Mi Claude Code"></div>
+      <button class="btn pink" onclick="genToken()">✨ Generar token</button>
+    </div>
+    <div id="tokFresh" style="margin-top:12px"></div>
+
+    <details style="margin-top:14px">
+      <summary class="muted" style="cursor:pointer">📋 Cómo usarlo en Claude Code</summary>
+      <div class="ai-panel" style="margin-top:10px">
+        <p>1. Genera un token aquí arriba y cópialo.</p>
+        <p>2. En tu sesión de Claude Code, pega esto (sustituye <code>TU_TOKEN</code>):</p>
+        <pre id="cchelp" style="white-space:pre-wrap;background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;font-family:'Fira Code',monospace;font-size:.82rem"></pre>
+        <button class="btn ghost btn-sm" onclick="copyHelp()">Copiar instrucciones</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Cambiar contraseña</h3>
+    <p class="muted">Usuario: <strong>{{ user }}</strong></p>
+    <label>Contraseña actual</label><input id="cur" type="password">
+    <label>Nueva contraseña</label><input id="new" type="password">
+    <button class="btn yellow" style="margin-top:14px" onclick="changePw()">Guardar</button>
+    <div id="pwMsg"></div>
+  </div>
+
+  {% if role=='admin' %}
+  <div class="card" style="margin-top:18px">
+    <h3>👥 Profesores</h3>
+    <p class="muted">Crea cuentas para otros profesores (ven y gestionan sus propios quizzes).</p>
+    <div id="teacherList" style="margin:12px 0">
+      {% for t in teachers %}
+      <div class="row" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:8px 0" data-u="{{ t.username }}">
+        <span>👤 {{ t.username }} <span class="team-badge">{{ t.role }}</span></span>
+        {% if t.role != 'admin' %}<button class="btn ghost btn-sm" onclick="delTeacher('{{ t.username }}')" aria-label="Eliminar profesor">🗑</button>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:1"><label>Usuario</label><input id="tu" placeholder="profe2"></div>
+      <div style="flex:1"><label>Contraseña</label><input id="tp" type="password"></div>
+      <button class="btn green" onclick="addTeacher()">Añadir</button>
+    </div>
+    <div id="tMsg"></div>
+  </div>
+  {% endif %}
+</div>
+<script>
+const API=location.origin;
+function helpText(tok){
+return `Eres mi asistente para gestionar Quizly (clon de Kahoot). Tienes control TOTAL vía esta API.
+API base: ${API}/api/v1
+Autenticación: cabecera "Authorization: Bearer ${tok}" en TODAS las llamadas.
+
+— Quizzes —
+- GET    /api/v1/quizzes                 listar mis quizzes
+- GET    /api/v1/quizzes/{id}            ver uno completo
+- POST   /api/v1/quizzes                 crear  {title,theme,folder,kind,questions}
+- PUT    /api/v1/quizzes/{id}            editar (mismo cuerpo)
+- DELETE /api/v1/quizzes/{id}            borrar
+- POST   /api/v1/quizzes/{id}/duplicate  duplicar
+
+— Salas en directo (alojar partidas) —
+- POST   /api/v1/rooms                   crear sala -> {code,join_url,host_url}
+- GET    /api/v1/rooms/{code}            estado: jugadores, clasificación, pregunta actual
+- POST   /api/v1/rooms/{code}/config     {teams_on,n_teams,shuffle_q,shuffle_opts,powerups}
+- POST   /api/v1/rooms/{code}/load       {quiz_id}
+- POST   /api/v1/rooms/{code}/start      empezar
+- POST   /api/v1/rooms/{code}/next       siguiente pregunta
+- POST   /api/v1/rooms/{code}/reveal     revelar ya
+- POST   /api/v1/rooms/{code}/end        terminar
+- POST   /api/v1/rooms/{code}/kick       {pid}
+
+— Resultados / analítica —
+- GET    /api/v1/results                 historial de partidas
+- GET    /api/v1/results/{id}            informe detallado
+
+— Cuenta / profesores —
+- POST   /api/v1/password                {current,new}
+- GET    /api/v1/teachers                (token admin) listar profesores
+- POST   /api/v1/teachers                (token admin) crear {username,password}
+- DELETE /api/v1/teachers/{username}     (token admin) borrar
+- GET    /api/v1/schema                  tipos de pregunta + lista de endpoints
+- GET    /api/v1/whoami                  validar token
+
+Tipos de pregunta (campo "type"):
+- choice:    {type:"choice",text,options:[4],answer:<idx>,time}
+- truefalse: {type:"truefalse",text,options:["Verdadero","Falso"],answer:<0|1>,time}
+- multi:     {type:"multi",text,options:[4],answers:[<idx>...],time}
+- fill:      {type:"fill",text:"... ____",answer:"palabra",time}
+- numeric:   {type:"numeric",text,answer:<num>,tol:<n>,min,max,time}
+- order:     {type:"order",text,items:[...en orden correcto...],time}
+Cada pregunta admite "image":"<url>" opcional.
+
+Ejemplo para crear un quiz con curl:
+curl -X POST ${API}/api/v1/quizzes \\
+  -H "Authorization: Bearer ${tok}" -H "Content-Type: application/json" \\
+  -d '{"title":"Mi quiz","theme":"Historia","folder":"General","kind":"mixto","questions":[{"type":"choice","text":"¿Año?","options":["1492","1500","1453","1521"],"answer":0,"time":20}]}'
+
+Cuando te pida crear/editar/borrar quizzes, usa estos endpoints con mi token.`;
+}
+function refreshHelp(tok){ const el=document.getElementById('cchelp'); if(el)el.textContent=helpText(tok||'TU_TOKEN'); }
+refreshHelp(null);
+function copyHelp(){ navigator.clipboard.writeText(document.getElementById('cchelp').textContent); }
+
+async function genToken(){
+  const label=document.getElementById('tokLabel').value.trim()||'Claude Code';
+  const r=await fetch('/admin/account/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label})});
+  const d=await r.json();
+  if(d.ok){
+    refreshHelp(d.token);
+    document.getElementById('tokFresh').innerHTML=
+      '<div class="rankbox" style="display:block">✅ Token creado (cópialo ahora, no se volverá a mostrar entero):<br><code style="word-break:break-all;color:var(--gold)">'+d.token+'</code> '+
+      '<button class="btn ghost btn-sm" onclick="navigator.clipboard.writeText(\''+d.token+'\')">Copiar</button></div>';
+  } else document.getElementById('tokFresh').innerHTML='<div class="err">Error</div>';
+}
+async function delToken(t){ if(!confirm('¿Revocar este token? Dejará de funcionar.'))return;
+  await fetch('/admin/account/token/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})});
+  location.reload();
+}
+
+async function changePw(){
+  const msg=document.getElementById('pwMsg');
+  const r=await fetch('/admin/account/password',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({current:document.getElementById('cur').value,new:document.getElementById('new').value})});
+  const d=await r.json();
+  msg.innerHTML=d.ok?'<div class="rankbox" style="margin-top:10px">✅ Contraseña actualizada</div>':'<div class="err">'+(d.error||'Error')+'</div>';
+  if(d.ok){document.getElementById('cur').value='';document.getElementById('new').value='';}
+}
+async function addTeacher(){
+  const msg=document.getElementById('tMsg');
+  const r=await fetch('/admin/account/teacher',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:document.getElementById('tu').value,password:document.getElementById('tp').value})});
+  const d=await r.json(); if(d.ok)location.reload(); else msg.innerHTML='<div class="err">'+(d.error||'Error')+'</div>';
+}
+async function delTeacher(u){ if(!confirm('¿Eliminar a '+u+'?'))return;
+  await fetch('/admin/account/teacher/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u})});
+  location.reload();
+}
+</script>
+{% include '_footer.html' %}
+</body>
+</html>

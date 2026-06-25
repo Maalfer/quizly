@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#020617">
+<title>Informe · Quizly</title>
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<style>@media print{.topbar,.noprint{display:none}body{background:#fff;color:#000}.card{border-color:#ccc}}</style>
+<script src="/static/quizly.js?v=17" defer></script>
+</head>
+<body>
+<div class="topbar wrap noprint">
+  <a href="/" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+  <a class="btn ghost" href="/admin/results">← Historial</a>
+</div>
+<div class="wrap">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <div><h2>{{ r.quiz_title }}</h2><p class="muted">{{ r.theme }} · {{ r.ended_at }} · modo {{ r.mode }}</p></div>
+    <div class="row noprint">
+      <a class="btn blue" href="/admin/results/{{ r.id }}/csv">⬇ CSV</a>
+      <button class="btn ghost" onclick="window.print()">🖨 PDF / Imprimir</button>
+    </div>
+  </div>
+
+  {% if d.teams_on and d.teams %}
+  <div class="card" style="margin-top:14px">
+    <h3>🚩 Equipos</h3>
+    <ol class="lb teamlb">
+      {% for t in d.teams %}<li><span class="pos">{{ loop.index }}</span><span class="av2">{{ t.emoji }}</span><span class="nm">{{ t.team }} <span class="muted">({{ t.members }})</span></span><span class="sc">{{ t.score }}</span></li>{% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+
+  <div class="card" style="margin-top:14px">
+    <h3>🏆 Clasificación</h3>
+    <table class="rt">
+      <tr><th>#</th><th>Jugador</th><th>Equipo</th><th>Puntos</th></tr>
+      {% for p in d.players %}
+      <tr><td>{{ loop.index }}</td><td><strong>{{ p.name }}</strong></td><td>{{ p.team or '—' }}</td><td>{{ p.score }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  {% if d.questions and d.questions[0].answered is defined %}
+  <div class="card" style="margin-top:14px">
+    <h3>🧩 Análisis por pregunta</h3>
+    <table class="rt">
+      <tr><th>Pregunta</th><th>Tipo</th><th>Respondieron</th><th>Acierto</th></tr>
+      {% for q in d.questions %}
+      <tr>
+        <td>{{ q.text }}</td>
+        <td><span class="tag">{{ q.type }}</span></td>
+        <td>{{ q.answered }}</td>
+        <td>
+          {% set pct = (100 * q.correct / q.answered) if q.answered else 0 %}
+          <div class="row" style="align-items:center;gap:8px">
+            <div class="statbar"><div style="width:{{ pct|round(0,'floor') }}%"></div></div>
+            <span class="muted">{{ pct|round(0,'floor') }}%</span>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p class="muted" style="margin-top:10px">Las preguntas con menor % de acierto son las que más cuestan a la clase.</p>
+  </div>
+  {% endif %}
+</div>
+</body>
+</html>

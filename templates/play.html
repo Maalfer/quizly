@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#020617">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Jugar · Quizly</title>
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<script src="/static/quizly.js?v=17" defer></script>
+</head>
+<body>
+<div class="wrap" style="min-height:100vh">
+  <div class="topbar">
+    <a href="/" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+    <div class="row" style="align-items:center">
+      <button class="mute-btn" id="muteBtn" onclick="toggleMute()" aria-label="Activar o silenciar el sonido">🔊</button>
+      <div id="me" class="chip"></div>
+    </div>
+  </div>
+
+  <!-- ESPERA -->
+  <div id="wait" class="center" style="min-height:60vh">
+    <div class="card" style="text-align:center">
+      <div class="meav" id="meAv"></div>
+      <h2 id="meName"></h2>
+      <div id="meTeam"></div>
+      <p class="muted">¡Estás dentro! Espera a que el profesor empiece…</p>
+      <div style="font-size:2rem;margin-top:14px">⏳</div>
+      <p class="muted" id="lobbyCount" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <!-- PREGUNTA -->
+  <div id="play" style="display:none">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <span class="muted">Pregunta <span id="idx"></span>/<span id="total"></span></span>
+        <span class="muted">⏱ <span id="time"></span></span>
+      </div>
+      <div class="timerbar"><div id="tbar"></div></div>
+      <div class="qbig" id="qText"></div>
+      <img id="qImg" class="qimg" alt="" style="display:none">
+      <div id="area"></div>
+      <div class="powerup" id="powerup" style="display:none">
+        <button class="btn boost" id="boostBtn" onclick="useBoost()">⚡ Apostar x2 (1 uso)</button>
+      </div>
+      <div id="status" class="feedback" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <!-- RESULTADO -->
+  <div id="result" style="display:none;padding:24px 0">
+    <div class="card" style="text-align:center;max-width:640px;margin:0 auto">
+      <p class="muted" id="resProgress"></p>
+      <div class="feedback" id="resFeedback" role="status" aria-live="polite"></div>
+      <h2 id="resPoints"></h2>
+      <div class="qbig" id="resQText" style="font-size:1.25rem;margin:14px 0 4px"></div>
+      <div id="resReview"></div>
+      <div class="rankbox" id="resRank" style="margin-top:16px"></div>
+      <p class="muted">Puntuación total: <strong id="resScore"></strong></p>
+      <p id="resStreak"></p>
+      <p class="muted dots" id="resWait" style="margin-top:16px">⏳ Espera a la siguiente pregunta…</p>
+    </div>
+  </div>
+
+  <!-- FINAL -->
+  <div id="final" class="center" style="display:none;min-height:60vh">
+    <div class="card" style="text-align:center">
+      <h2 id="finRank"></h2>
+      <p class="muted">Has terminado con <strong id="finScore"></strong> puntos</p>
+      <div class="podium" id="finPodium"></div>
+      <div id="finTeam"></div>
+      <a class="btn yellow" href="/" style="margin-top:24px">Salir</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const CODE="{{ code }}";
+const NAME=sessionStorage.getItem('quizly_name');
+const AVATAR=sessionStorage.getItem('quizly_avatar')||'🦊';
+const TEAM=sessionStorage.getItem('quizly_team_'+CODE)||'';
+if(!NAME){ location.href='/join/'+CODE; }
+let PID=sessionStorage.getItem('quizly_pid_'+CODE)||null;
+
+window.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('meAv').innerHTML=Q.avatarHtml(AVATAR);
+  document.getElementById('meName').textContent=NAME;
+  document.getElementById('me').innerHTML=Q.avatarHtml(AVATAR)+' '+Q.esc(NAME);
+});
+
+function show(id){['wait','play','result','final'].forEach(s=>document.getElementById(s).style.display=(s===id?((s==='play'||s==='result')?'block':'flex'):'none'));}
+function toggleMute(){ const m=Q.toggleMute(); document.getElementById('muteBtn').textContent=m?'🔇':'🔊'; }
+
+let ws,tInt,answered=false,curType=null,orderArr=[],multiSel=[],boostArmed=false,lastQ=null,myAnswer=null;
+function connect(){ ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws/play/'+CODE);
+  ws.onopen=()=>ws.send(JSON.stringify({action:'join',name:NAME,avatar:AVATAR,team:TEAM,pid:PID}));
+  ws.onmessage=ev=>handle(JSON.parse(ev.data)); ws.onclose=()=>setTimeout(connect,1500); }
+function send(o){ if(ws&&ws.readyState===1)ws.send(JSON.stringify(o)); }
+
+function handle(m){
+  if(m.type==='joined'){ PID=m.pid; sessionStorage.setItem('quizly_pid_'+CODE,PID);
+    if(m.team){ sessionStorage.setItem('quizly_team_'+CODE,m.team);
+      document.getElementById('meTeam').innerHTML='<span class="team-badge">Equipo '+m.team+'</span>'; } }
+  else if(m.type==='error'){ document.getElementById('wait').innerHTML='<div class="card" style="text-align:center"><h2>😕 '+Q.esc(m.msg)+'</h2><a class="btn yellow" href="/join" style="margin-top:16px">Volver</a></div>'; show('wait'); }
+  else if(m.type==='lobby'){ document.getElementById('lobbyCount').textContent=m.count+' jugadores en la sala'; }
+  else if(m.type==='game_start'){ Q.resume(); show('play'); }
+  else if(m.type==='question'){ renderQuestion(m); }
+  else if(m.type==='answer_ack'){ document.getElementById('status').textContent=m.boosted?'⚡ x2 enviada':'✅ Respuesta enviada'; }
+  else if(m.type==='boost_armed'){ boostArmed=true; const b=document.getElementById('boostBtn'); b.classList.add('armed'); b.textContent='⚡ x2 ACTIVADO'; Q.sfx.boost(); }
+  else if(m.type==='reveal'){ renderReveal(m); }
+  else if(m.type==='end'){ renderEnd(m); }
+}
+
+function renderQuestion(m){
+  answered=false; orderArr=[]; multiSel=[]; boostArmed=false; curType=m.qtype; lastQ=m; myAnswer=null; show('play');
+  document.getElementById('idx').textContent=m.index; document.getElementById('total').textContent=m.total;
+  document.getElementById('time').textContent=m.time+'s'; document.getElementById('qText').textContent=m.text;
+  document.getElementById('status').textContent='';
+  const img=document.getElementById('qImg'); if(m.image){img.src=m.image;img.alt='Imagen de la pregunta';img.style.display='block';}else{img.style.display='none';img.alt='';}
+  const pu=document.getElementById('powerup'); const bb=document.getElementById('boostBtn');
+  bb.classList.remove('armed'); bb.textContent='⚡ Apostar x2 (1 uso)'; bb.disabled=false;
+  pu.style.display=(m.powerups && !sessionStorage.getItem('boostUsed_'+CODE))?'block':'none';
+  const area=document.getElementById('area'); const syms=['▲','◆','●','■'];
+  if(m.qtype==='choice'||m.qtype==='truefalse'){
+    area.className=m.qtype==='truefalse'?'tf':'answers';
+    area.innerHTML=m.options.map((o,i)=>'<button class="ans a'+i+'" onclick="answerChoice('+i+')"><span class="sym">'+syms[i]+'</span>'+Q.esc(o)+'</button>').join('');
+  } else if(m.qtype==='multi'){
+    area.className='answers';
+    area.innerHTML=m.options.map((o,i)=>'<button class="ans a'+i+'" data-i="'+i+'" onclick="toggleMulti('+i+')"><span class="sym">'+syms[i]+'</span>'+Q.esc(o)+'</button>').join('')+
+      '<button class="btn green" style="grid-column:1/-1;margin-top:4px" onclick="sendMulti()">Enviar respuesta</button>';
+    area.insertAdjacentHTML('beforebegin','');
+  } else if(m.qtype==='numeric'){
+    area.className='numeric-box';
+    const mid=Math.round((m.min+m.max)/2);
+    area.innerHTML='<div class="numeric-val" id="numVal">'+mid+'</div>'+
+      '<input type="range" id="numRange" min="'+m.min+'" max="'+m.max+'" value="'+mid+'" oninput="document.getElementById(\'numVal\').textContent=this.value">'+
+      '<div class="row" style="justify-content:space-between"><span class="muted">'+m.min+'</span><span class="muted">'+m.max+'</span></div>'+
+      '<button class="btn green" style="width:100%;margin-top:14px" onclick="sendNumeric()">Responder</button>';
+  } else if(m.qtype==='order'){
+    area.className=''; orderArr=m.items.slice();
+    area.innerHTML='<p class="muted" style="text-align:center">Arrastra para ordenar correctamente</p><ul class="order-list" id="orderList"></ul>'+
+      '<button class="btn green" style="width:100%;margin-top:10px" onclick="sendOrder()">Confirmar orden</button>';
+    renderOrder();
+  } else { // fill
+    area.className='';
+    area.innerHTML='<input id="fillInput" placeholder="Escribe tu respuesta" style="margin-top:14px" onkeydown="if(event.key===\'Enter\')sendFill()">'+
+      '<button class="btn green" style="width:100%;margin-top:12px" onclick="sendFill()">Responder</button>';
+  }
+  runTimer(m.time); Q.sfx.tick();
+}
+
+function lock(){ answered=true; document.getElementById('powerup').style.display='none';
+  document.querySelectorAll('#area .ans,#area input,#area button').forEach(e=>e.disabled=true); }
+function useBoost(){ if(answered||boostArmed)return; send({action:'boost'}); sessionStorage.setItem('boostUsed_'+CODE,'1'); }
+
+function answerChoice(i){ if(answered)return; Q.sfx.select(); myAnswer=i;
+  document.querySelectorAll('#area .ans').forEach((a,k)=>{ if(k===i)a.classList.add('sel'); else a.classList.add('dim'); });
+  lock(); send({action:'answer',value:i}); }
+function toggleMulti(i){ if(answered)return; const btn=document.querySelector('#area .ans[data-i="'+i+'"]'); const k=multiSel.indexOf(i);
+  if(k>=0){multiSel.splice(k,1);btn.classList.remove('sel');}else{multiSel.push(i);btn.classList.add('sel');} Q.sfx.select(); }
+function sendMulti(){ if(answered)return; myAnswer=multiSel.slice(); lock(); send({action:'answer',value:multiSel}); }
+function sendNumeric(){ if(answered)return; myAnswer=parseFloat(document.getElementById('numRange').value); lock(); send({action:'answer',value:myAnswer}); }
+function sendFill(){ if(answered)return; const v=document.getElementById('fillInput').value.trim(); if(!v)return; myAnswer=v; lock(); send({action:'answer',value:v}); }
+function sendOrder(){ if(answered)return; myAnswer=orderArr.slice(); lock(); send({action:'answer',value:orderArr}); }
+
+function renderOrder(){ const ul=document.getElementById('orderList');
+  ul.innerHTML=orderArr.map((it,i)=>'<li class="order-item" draggable="true" data-i="'+i+'"><span class="ord-n">'+(i+1)+'</span>'+Q.esc(it)+'<span class="grip">⠿</span></li>').join('');
+  let di=null;
+  ul.querySelectorAll('.order-item').forEach(li=>{
+    li.addEventListener('dragstart',()=>{di=+li.dataset.i;li.classList.add('dragging');});
+    li.addEventListener('dragend',()=>{di=null;li.classList.remove('dragging');});
+    li.addEventListener('dragover',e=>e.preventDefault());
+    li.addEventListener('drop',e=>{e.preventDefault();const to=+li.dataset.i;if(di===null||di===to)return;const m=orderArr.splice(di,1)[0];orderArr.splice(to,0,m);renderOrder();});
+  });
+}
+
+function reviewHtml(q,correct,mine){
+  if(!q) return '';
+  const syms=['▲','◆','●','■'];
+  if(q.qtype==='choice'||q.qtype==='truefalse'){
+    return '<div class="answers review">'+(q.options||[]).map((o,i)=>{
+      let cls='ans a'+i+' rev',tag='';
+      if(i===correct){cls+=' ok';tag='✓';} else if(mine===i){cls+=' bad';tag='✗';} else cls+=' dim';
+      return '<div class="'+cls+'"><span class="sym">'+syms[i]+'</span>'+Q.esc(o)+'<span class="revtag">'+tag+'</span></div>';
+    }).join('')+'</div>';
+  }
+  if(q.qtype==='multi'){
+    const corr=correct||[], mn=mine||[];
+    return '<div class="answers review">'+(q.options||[]).map((o,i)=>{
+      let cls='ans a'+i+' rev',tag='';
+      if(corr.includes(i)){cls+=' ok';tag='✓';} else if(mn.includes(i)){cls+=' bad';tag='✗';} else cls+=' dim';
+      return '<div class="'+cls+'"><span class="sym">'+syms[i]+'</span>'+Q.esc(o)+'<span class="revtag">'+tag+'</span></div>';
+    }).join('')+'</div>';
+  }
+  if(q.qtype==='order'){
+    return '<p class="muted" style="margin-top:8px">Orden correcto:</p><p><strong style="color:var(--green)">'+(correct||[]).map(Q.esc).join(' → ')+'</strong></p>';
+  }
+  const mineTxt=(mine===null||mine===undefined||mine==='')?'(sin responder)':Q.esc(String(mine));
+  return '<p style="margin-top:8px">Respuesta correcta: <strong style="color:var(--green)">'+Q.esc(String(correct))+'</strong></p>'+
+    '<p class="muted">Tu respuesta: '+mineTxt+'</p>';
+}
+function renderReveal(m){
+  clearInterval(tInt); show('result'); const ok=m.you_got>0;
+  ok?Q.sfx.correct():Q.sfx.wrong();
+  document.getElementById('resProgress').textContent='Pregunta '+m.q_index+' de '+m.q_total+' · respondida';
+  document.getElementById('resFeedback').textContent=ok?'✅ ¡Correcto!':'❌ Fallaste';
+  document.getElementById('resFeedback').className='feedback '+(ok?'good':'bad');
+  document.getElementById('resPoints').textContent=ok?('+'+m.you_got+' puntos'):'+0 puntos';
+  document.getElementById('resQText').textContent=lastQ?lastQ.text:'';
+  document.getElementById('resReview').innerHTML=reviewHtml(lastQ,m.correct,myAnswer);
+  const medal=m.rank===1?'🥇':m.rank===2?'🥈':m.rank===3?'🥉':'';
+  document.getElementById('resRank').innerHTML=medal+' Vas en el puesto <strong>'+m.rank+'</strong> de '+m.players;
+  document.getElementById('resScore').textContent=m.score;
+  document.getElementById('resStreak').textContent=m.streak>1?('🔥 Racha de '+m.streak):'';
+  document.getElementById('resWait').textContent=m.has_next?'⏳ Espera a la siguiente pregunta…':'🏁 Calculando la clasificación final…';
+}
+function renderEnd(m){
+  show('final'); const medal=m.rank===1?'🥇':m.rank===2?'🥈':m.rank===3?'🥉':'';
+  if(m.rank<=3){Q.sfx.podium();Q.confetti();}
+  document.getElementById('finRank').textContent=medal+' Puesto '+m.rank+' de '+m.total;
+  document.getElementById('finScore').textContent=m.score;
+  document.getElementById('finPodium').innerHTML=(m.podium||[]).map((p,i)=>{const cls=['p1','p2','p3'][i];
+    return '<div class="pod '+cls+'">'+Q.avatarHtml(p.avatar,'av3')+'<strong>'+Q.esc(p.name)+'</strong><div>'+p.score+'</div></div>';}).join('');
+  if(m.teams_on&&m.team_board&&m.team_board.length){
+    document.getElementById('finTeam').innerHTML='<h3 style="margin-top:18px">Equipos</h3><ol class="lb teamlb">'+
+      m.team_board.map((t,i)=>'<li><span class="pos">'+(i+1)+'</span><span class="av2">'+t.emoji+'</span><span class="nm">'+t.team+'</span><span class="sc">'+t.score+'</span></li>').join('')+'</ol>';
+  }
+}
+function runTimer(sec){ const bar=document.getElementById('tbar'); bar.style.transition='none'; bar.style.width='100%';
+  requestAnimationFrame(()=>{bar.style.transition='width '+sec+'s linear';bar.style.width='0%';}); clearInterval(tInt);
+  let t=sec; tInt=setInterval(()=>{t--;document.getElementById('time').textContent=Math.max(0,t)+'s';if(t<=0)clearInterval(tInt);},1000); }
+connect();
+setInterval(()=>send({action:'ping'}),25000);
+</script>
+</body>
+</html>

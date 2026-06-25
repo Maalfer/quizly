@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#020617">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/logo_120.png">
+<title>Quizly — concursos en directo</title>
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<script src="/static/quizly.js?v=17" defer></script>
+</head>
+<body class="landing">
+<a class="skip-link" href="#main">Saltar al contenido</a>
+<div class="topbar wrap">
+  <a href="{{ '/admin' if user else '/' }}" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+  {% if user %}
+  <div class="row" style="align-items:center">
+    <span class="muted">👤 {{ user }}</span>
+    <a class="btn yellow" href="/admin">Ir al panel</a>
+    <a class="btn ghost" href="/logout">Salir</a>
+  </div>
+  {% else %}
+  <a class="btn ghost" href="/login">Acceso profesor</a>
+  {% endif %}
+</div>
+
+<div id="main" role="main" class="center wrap landing-main">
+  <div class="hero">
+    <div class="tag">EN DIRECTO · TIEMPO REAL</div>
+    <h1>Convierte tu clase en un <span style="color:var(--yellow)">concurso</span></h1>
+    <p>Crea una sala, comparte el PIN y deja que tus alumnos compitan respondiendo
+       preguntas en tiempo real. Tipo test, verdadero/falso, ordenar, numéricas o de rellenar frases. Clasificación al instante.</p>
+    <div class="row" style="justify-content:center">
+      <a class="btn green big" href="/join">▶ Unirme con un PIN</a>
+      <a class="btn yellow big" href="{{ '/admin' if user else '/login' }}">{{ 'Ir al panel' if user else 'Crear sala' }}</a>
+    </div>
+  </div>
+</div>
+{% include '_footer.html' %}
+</body>
+</html>

@@ -1,0 +1,37 @@
+# Secretos y configuración local
+.env
+*.env.local
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Bytecode / caché de Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Bases de datos locales / backups
+*.db
+*.db.bak
+*.sqlite
+*.sqlite3
+*.sqlite-bak
+*.sql
+*.bak
+
+# Subidas de usuarios (fotos de perfil, imágenes de preguntas)
+static/uploads/*
+!static/uploads/.gitkeep
+
+# Datos de MariaDB (volumen Docker montado en el host, si aplica)
+mysql-data/
+db-data/
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

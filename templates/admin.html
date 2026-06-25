@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#020617">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Panel · Quizly</title>
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<script src="/static/quizly.js?v=17" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Saltar al contenido</a>
+<div class="topbar wrap">
+  <a href="/" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+  <div class="row" style="align-items:center">
+    <span class="muted">👤 {{ user }} {% if role=='admin' %}<span class="team-badge">admin</span>{% endif %}</span>
+    <a class="btn ghost" href="/logout">Salir</a>
+  </div>
+</div>
+
+<div id="main" role="main" class="wrap">
+  <div class="card" style="text-align:center;margin-bottom:20px">
+    <h2>Crear una sala temporal</h2>
+    <p class="muted">Se generará un PIN y un enlace para que entren los alumnos.</p>
+    <button class="btn green big" style="margin-top:14px" onclick="createRoom()">＋ Nueva sala</button>
+    <div id="roomErr"></div>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn yellow" onclick="newQuiz()">＋ Crear quiz</button>
+    <button class="btn pink" onclick="newQuizAI()">✨ Generar con IA</button>
+    <button class="btn blue" onclick="document.getElementById('importFile').click()">⬆ Importar JSON</button>
+    <a class="btn ghost" href="/admin/results">📊 Resultados</a>
+    <a class="btn ghost" href="/admin/account">⚙️ Mi cuenta</a>
+    <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importQuiz(this)">
+  </div>
+
+  <h3 style="margin:6px 0">Banco de quizzes <span class="muted">({{ quizzes|length }})</span></h3>
+  <div id="quizList">
+    {% for folder in folders %}
+    <div class="folder-group">
+      <div class="folder-title">📁 {{ folder }}</div>
+      {% for q in quizzes if q.folder == folder %}
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px" data-id="{{ q.id }}">
+        <div>
+          <strong>{{ q.title }}</strong>
+          <span class="tag {{ q.kind }}">{{ q.kind }}</span>
+          <div class="muted">{{ q.theme }} · {{ q.n }} preguntas</div>
+        </div>
+        <div class="row" style="flex-wrap:nowrap">
+          <button class="btn blue" onclick="editQuiz({{ q.id }})">✏️ Editar</button>
+          <button class="btn ghost" onclick="dupQuiz({{ q.id }})" title="Duplicar" aria-label="Duplicar quiz">⧉</button>
+          <a class="btn ghost" href="/admin/quiz/{{ q.id }}/export" title="Exportar JSON" aria-label="Exportar quiz en JSON">⬇</a>
+            <button class="btn ghost" onclick="delQuiz({{ q.id }})" title="Eliminar" aria-label="Eliminar quiz">🗑</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- MODAL EDITOR -->
+<div class="modal-overlay" id="modal" role="dialog" aria-modal="true" aria-labelledby="editorTitle" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="editorTitle" style="margin:0">Crear un quiz</h3>
+      <button class="modal-x" onclick="closeModal()" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="row">
+        <div style="flex:2"><label>Título</label><input id="qTitle" placeholder="Mi quiz"></div>
+        <div style="flex:1"><label>Temática</label><input id="qTheme" placeholder="Cultura general"></div>
+        <div style="flex:1"><label>Carpeta</label><input id="qFolder" placeholder="General"></div>
+      </div>
+
+      <div class="ai-panel" id="aiPanel" style="display:none">
+        <h4>✨ Generar preguntas con IA</h4>
+        {% if not ai_on %}
+        <div class="err">La IA no está configurada en el servidor (falta <code>ANTHROPIC_API_KEY</code>). Pídeselo al administrador del VPS.</div>
+        {% endif %}
+        <div class="row" style="align-items:flex-end">
+          <div style="flex:3"><label>Tema</label><input id="aiTopic" placeholder="Ej. Redes informáticas, la Edad Media…"></div>
+          <div style="flex:1"><label>Nº</label><input id="aiN" type="number" value="5" min="1" max="15"></div>
+          <div style="flex:2"><label>Tipo</label>
+            <select id="aiType">
+              <option value="mixto">Mixto</option>
+              <option value="choice">Test</option>
+              <option value="truefalse">Verdadero/Falso</option>
+              <option value="multi">Respuesta múltiple</option>
+              <option value="fill">Rellenar</option>
+              <option value="numeric">Numérico</option>
+            </select>
+          </div>
+          <button class="btn pink" id="aiBtn" onclick="generateAI()" {% if not ai_on %}disabled{% endif %}>Generar</button>
+        </div>
+        <div id="aiMsg" class="muted" style="margin-top:8px"></div>
+      </div>
+
+      <div id="builder" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn ghost" onclick="addQuestion()">＋ Añadir pregunta</button>
+        <button class="btn pink ghost" onclick="toggleAI()">✨ IA</button>
+      </div>
+      <div id="saveMsg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn yellow" id="saveBtn" onclick="saveQuiz()">Guardar quiz</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const AI_ON = {{ 'true' if ai_on else 'false' }};
+async function createRoom(){
+  const r=await fetch('/admin/room/create',{method:'POST'}); const d=await r.json();
+  if(d.ok)location.href='/host/'+d.code;
+  else document.getElementById('roomErr').innerHTML='<div class="err">No se pudo crear la sala</div>';
+}
+async function delQuiz(id){ if(!confirm('¿Eliminar este quiz?'))return;
+  await fetch('/admin/quiz/'+id+'/delete',{method:'POST'}); location.reload(); }
+async function dupQuiz(id){ await fetch('/admin/quiz/'+id+'/duplicate',{method:'POST'}); location.reload(); }
+async function importQuiz(inp){
+  const f=inp.files[0]; if(!f)return; const txt=await f.text();
+  try{ const payload=JSON.parse(txt);
+    const r=await fetch('/admin/quiz/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload})});
+    const d=await r.json(); if(d.ok)location.reload(); else alert(d.error||'Error al importar');
+  }catch(e){ alert('Archivo JSON no válido'); }
+}
+
+const TYPES=[['choice','Test'],['truefalse','V/F'],['multi','Múltiple'],['fill','Rellenar'],['numeric','Numérico'],['order','Ordenar']];
+let questions=[], editingId=null;
+
+function openModal(){ document.getElementById('modal').classList.add('open'); document.body.style.overflow='hidden'; setTimeout(()=>{var e=document.getElementById('qTitle'); if(e)e.focus();},60); }
+function closeModal(){ document.getElementById('modal').classList.remove('open'); document.body.style.overflow=''; document.getElementById('aiPanel').style.display='none'; }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape')closeModal(); });
+function toggleAI(){ const p=document.getElementById('aiPanel'); p.style.display=p.style.display==='none'?'block':'none'; }
+
+function blank(type){
+  if(type==='choice')return {type,text:'',image:'',options:['','','',''],answer:0,time:20};
+  if(type==='truefalse')return {type,text:'',image:'',options:['Verdadero','Falso'],answer:0,time:15};
+  if(type==='multi')return {type,text:'',image:'',options:['','','',''],answers:[],time:25};
+  if(type==='fill')return {type,text:'',image:'',answer:'',time:20};
+  if(type==='numeric')return {type,text:'',image:'',answer:0,tol:0,min:0,max:100,time:20};
+  if(type==='order')return {type,text:'',image:'',items:['','',''],time:25};
+}
+function newQuiz(){
+  editingId=null; document.getElementById('qTitle').value=''; document.getElementById('qTheme').value='';
+  document.getElementById('qFolder').value='General';
+  questions=[blank('choice')];
+  document.getElementById('editorTitle').textContent='Crear un quiz';
+  document.getElementById('saveBtn').textContent='Guardar quiz';
+  document.getElementById('saveMsg').innerHTML=''; renderBuilder(); openModal();
+}
+function newQuizAI(){ newQuiz(); questions=[]; renderBuilder(); document.getElementById('aiPanel').style.display='block'; }
+async function editQuiz(id){
+  const r=await fetch('/api/quiz/'+id); const d=await r.json();
+  if(!d.ok){alert('No se pudo cargar');return;}
+  editingId=id; document.getElementById('qTitle').value=d.title; document.getElementById('qTheme').value=d.theme;
+  document.getElementById('qFolder').value=d.folder||'General';
+  questions=JSON.parse(JSON.stringify(d.questions)).map(normalizeQ);
+  document.getElementById('editorTitle').textContent='✏️ Editando: '+d.title;
+  document.getElementById('saveBtn').textContent='Guardar cambios';
+  document.getElementById('saveMsg').innerHTML=''; renderBuilder(); openModal();
+}
+function normalizeQ(q){
+  q.type=q.type||'choice'; q.image=q.image||''; q.time=q.time||20;
+  if(q.type==='choice'){q.options=q.options||['','','',''];q.answer=q.answer||0;}
+  if(q.type==='truefalse'){q.options=q.options||['Verdadero','Falso'];q.answer=q.answer||0;}
+  if(q.type==='multi'){q.options=q.options||['','','',''];q.answers=q.answers||[];}
+  if(q.type==='numeric'){q.answer=q.answer??0;q.tol=q.tol??0;q.min=q.min??0;q.max=q.max??100;}
+  if(q.type==='order'){q.items=q.items||['','',''];}
+  if(q.type==='fill'){q.answer=q.answer||'';}
+  return q;
+}
+function addQuestion(){ questions.push(blank('choice')); renderBuilder(); scrollBuilderBottom(); }
+function setType(i,t){ const old=questions[i]; const nq=blank(t); nq.text=old.text; nq.image=old.image; nq.time=old.time; questions[i]=nq; renderBuilder(); }
+function scrollBuilderBottom(){ const b=document.getElementById('builder'); b.lastElementChild&&b.lastElementChild.scrollIntoView({behavior:'smooth'}); }
+
+function renderBuilder(){
+  const b=document.getElementById('builder'); b.innerHTML='';
+  const syms=['▲','◆','●','■'];
+  questions.forEach((q,i)=>{
+    const div=document.createElement('div'); div.className='qcard'; div.draggable=true; div.dataset.i=i;
+    let h='<div class="qcard-head"><span class="qnum">'+(i+1)+'</span>'+
+      '<span class="grip muted" title="Arrastra para reordenar">⠿ arrastrar</span>'+
+      '<button class="btn ghost btn-sm" onclick="questions.splice('+i+',1);renderBuilder()">🗑 Quitar</button></div>';
+    h+='<div class="qtype-row">'+TYPES.map(([t,l])=>'<span class="qt'+(q.type===t?' on':'')+'" onclick="setType('+i+',\''+t+'\')">'+l+'</span>').join('')+'</div>';
+    h+='<div class="field"><span class="field-label">📝 Enunciado</span><textarea rows="2" placeholder="Escribe la pregunta…" oninput="questions['+i+'].text=this.value">'+Q.esc(q.text)+'</textarea></div>';
+    h+='<div class="field"><span class="field-label">🖼 Imagen (URL, opcional)</span><input value="'+Q.esc(q.image)+'" placeholder="https://… (déjalo vacío si no quieres imagen)" oninput="questions['+i+'].image=this.value"></div>';
+    if(q.type==='choice'||q.type==='truefalse'){
+      const editable=q.type==='choice';
+      h+='<div class="field"><span class="field-label">🎯 '+(q.type==='truefalse'?'Marca la opción correcta':'Opciones — pulsa «Marcar» en la correcta')+'</span>';
+      q.options.forEach((o,j)=>{const ok=q.answer===j;
+        h+='<div class="opt'+(ok?' correct':'')+'"><span class="opt-sym a'+j+'">'+syms[j]+'</span>'+
+          '<input value="'+Q.esc(o)+'" '+(editable?'':'readonly')+' placeholder="Opción '+(j+1)+'" oninput="questions['+i+'].options['+j+']=this.value">'+
+          '<button type="button" class="opt-mark'+(ok?' on':'')+'" onclick="questions['+i+'].answer='+j+';renderBuilder()">'+(ok?'✓ Correcta':'Marcar')+'</button></div>';});
+      h+='</div>';
+    } else if(q.type==='multi'){
+      h+='<div class="field"><span class="field-label">🎯 Opciones — marca TODAS las correctas</span>';
+      q.options.forEach((o,j)=>{const ok=(q.answers||[]).includes(j);
+        h+='<div class="opt'+(ok?' correct':'')+'"><span class="opt-sym a'+j+'">'+syms[j]+'</span>'+
+          '<input value="'+Q.esc(o)+'" placeholder="Opción '+(j+1)+'" oninput="questions['+i+'].options['+j+']=this.value">'+
+          '<button type="button" class="opt-mark'+(ok?' on':'')+'" onclick="toggleMulti('+i+','+j+')">'+(ok?'✓':'Marcar')+'</button></div>';});
+      h+='</div>';
+    } else if(q.type==='fill'){
+      h+='<div class="field"><span class="field-label">✅ Respuesta correcta</span><input value="'+Q.esc(q.answer)+'" placeholder="palabra o frase" oninput="questions['+i+'].answer=this.value"></div>';
+    } else if(q.type==='numeric'){
+      h+='<div class="row"><div class="field" style="flex:1"><span class="field-label">✅ Valor correcto</span><input type="number" value="'+q.answer+'" oninput="questions['+i+'].answer=parseFloat(this.value)"></div>'+
+        '<div class="field" style="flex:1"><span class="field-label">± Tolerancia</span><input type="number" value="'+q.tol+'" oninput="questions['+i+'].tol=parseFloat(this.value)||0"></div></div>'+
+        '<div class="row"><div class="field" style="flex:1"><span class="field-label">Mín (slider)</span><input type="number" value="'+q.min+'" oninput="questions['+i+'].min=parseFloat(this.value)||0"></div>'+
+        '<div class="field" style="flex:1"><span class="field-label">Máx (slider)</span><input type="number" value="'+q.max+'" oninput="questions['+i+'].max=parseFloat(this.value)||100"></div></div>';
+    } else if(q.type==='order'){
+      h+='<div class="field"><span class="field-label">🔢 Elementos EN EL ORDEN CORRECTO (se mostrarán desordenados)</span>';
+      q.items.forEach((o,j)=>{h+='<div class="opt"><span class="ord-n">'+(j+1)+'</span>'+
+        '<input value="'+Q.esc(o)+'" placeholder="Elemento '+(j+1)+'" oninput="questions['+i+'].items['+j+']=this.value">'+
+        '<button type="button" class="opt-mark" onclick="questions['+i+'].items.splice('+j+',1);renderBuilder()">✕</button></div>';});
+      h+='<button class="btn ghost btn-sm" style="margin-top:6px" onclick="questions['+i+'].items.push(\'\');renderBuilder()">＋ Elemento</button></div>';
+    }
+    h+='<div class="field"><span class="field-label">⏱ Tiempo (segundos)</span><input type="number" value="'+q.time+'" min="5" max="120" style="max-width:140px" oninput="questions['+i+'].time=parseInt(this.value)||20"></div>';
+    div.innerHTML=h; b.appendChild(div);
+  });
+  setupDnD();
+}
+function toggleMulti(i,j){ const a=questions[i].answers||[]; const k=a.indexOf(j);
+  if(k>=0)a.splice(k,1); else a.push(j); questions[i].answers=a; renderBuilder(); }
+
+// Drag & drop para reordenar preguntas
+let dragI=null;
+function setupDnD(){
+  document.querySelectorAll('.qcard').forEach(c=>{
+    c.addEventListener('dragstart',()=>{dragI=+c.dataset.i;c.classList.add('dragging');});
+    c.addEventListener('dragend',()=>{dragI=null;c.classList.remove('dragging');});
+    c.addEventListener('dragover',e=>e.preventDefault());
+    c.addEventListener('drop',e=>{e.preventDefault(); const to=+c.dataset.i;
+      if(dragI===null||dragI===to)return; const m=questions.splice(dragI,1)[0]; questions.splice(to,0,m); renderBuilder();});
+  });
+}
+
+async function generateAI(){
+  const topic=document.getElementById('aiTopic').value.trim();
+  const n=document.getElementById('aiN').value; const qtype=document.getElementById('aiType').value;
+  const msg=document.getElementById('aiMsg'); const btn=document.getElementById('aiBtn');
+  if(!topic){msg.innerHTML='<span class="err">Indica un tema</span>';return;}
+  btn.disabled=true; msg.innerHTML='<span class="spinner"></span> Generando con IA…';
+  try{
+    const r=await fetch('/admin/quiz/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic,n,qtype})});
+    const d=await r.json();
+    if(d.ok){ d.questions.forEach(q=>questions.push(normalizeQ(q))); renderBuilder();
+      msg.innerHTML='✅ '+d.questions.length+' preguntas añadidas. Revísalas y guarda.';
+      if(!document.getElementById('qTitle').value) document.getElementById('qTitle').value=topic;
+    } else msg.innerHTML='<span class="err">'+(d.error||'Error')+'</span>';
+  }catch(e){ msg.innerHTML='<span class="err">Error de red</span>'; }
+  btn.disabled=false;
+}
+
+async function saveQuiz(){
+  const title=document.getElementById('qTitle').value.trim();
+  const theme=document.getElementById('qTheme').value.trim()||'General';
+  const folder=document.getElementById('qFolder').value.trim()||'General';
+  const msg=document.getElementById('saveMsg');
+  if(!title||questions.length===0){msg.innerHTML='<div class="err">Pon un título y al menos una pregunta</div>';return;}
+  const url=editingId?('/admin/quiz/'+editingId+'/update'):'/admin/quiz/new';
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,theme,folder,kind:'mixto',questions})});
+  const d=await r.json(); if(d.ok)location.reload(); else msg.innerHTML='<div class="err">'+(d.error||'Error')+'</div>';
+}
+</script>
+{% include '_footer.html' %}
+</body>
+</html>

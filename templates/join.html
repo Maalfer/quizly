@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#020617">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Unirse · Quizly</title>
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<script src="/static/quizly.js?v=17" defer></script>
+</head>
+<body>
+<div class="center wrap">
+  <div class="card" style="width:100%;max-width:440px">
+    <a href="/" class="brand" style="justify-content:center;margin-bottom:14px"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+
+    <div id="step1">
+      <label>PIN de la sala</label>
+      <input id="code" inputmode="numeric" maxlength="6" value="{{ code }}" placeholder="123456"
+             style="text-align:center;letter-spacing:6px;font-size:1.6rem;font-weight:800">
+      <button class="btn green" style="width:100%;margin-top:16px" onclick="checkCode()">Continuar</button>
+      <div id="err1"></div>
+    </div>
+
+    <div id="step2" style="display:none">
+      <label>Tu nombre</label>
+      <input id="name" maxlength="20" placeholder="Ej. Mario">
+
+      <label>Tu avatar</label>
+      <div class="row" style="align-items:center;gap:14px">
+        <div id="avPreview" style="font-size:2.4rem"></div>
+        <button class="btn ghost" type="button" onclick="document.getElementById('photo').click()">📷 Subir foto</button>
+        <input type="file" id="photo" accept="image/*" style="display:none" onchange="uploadPhoto(this)">
+        <span class="muted" id="upMsg"></span>
+      </div>
+      <p class="muted" style="margin:10px 0 4px;font-size:.85rem">…o elige un emoji:</p>
+      <div class="avatars" id="avatars">
+        {% for a in avatars %}<div class="av" data-a="{{ a }}">{{ a }}</div>{% endfor %}
+      </div>
+
+      <button class="btn yellow" style="width:100%;margin-top:18px" onclick="enter()">Entrar a la sala 🚀</button>
+      <div id="err2"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let selAvatar=null;
+function setAvatar(a){ selAvatar=a; document.getElementById('avPreview').innerHTML=Q.avatarHtml(a);
+  document.querySelectorAll('.av').forEach(x=>x.classList.toggle('sel', x.dataset.a===a)); }
+document.querySelectorAll('.av').forEach(el=>el.onclick=()=>setAvatar(el.dataset.a));
+
+async function uploadPhoto(inp){
+  const f=inp.files[0]; if(!f)return; const msg=document.getElementById('upMsg');
+  msg.textContent='Subiendo…';
+  const fd=new FormData(); fd.append('file',f);
+  try{ const r=await fetch('/upload/avatar',{method:'POST',body:fd}); const d=await r.json();
+    if(d.ok){ setAvatar(d.url); document.querySelectorAll('.av').forEach(x=>x.classList.remove('sel')); msg.textContent='✅ Foto lista'; }
+    else msg.innerHTML='<span class="err">'+(d.error||'Error')+'</span>';
+  }catch(e){ msg.textContent='Error al subir'; }
+}
+
+async function checkCode(){
+  const code=document.getElementById('code').value.trim();
+  if(code.length<4){err('err1','Introduce un PIN válido');return;}
+  const r=await fetch('/api/room/'+code+'/exists'); const d=await r.json();
+  if(!d.exists){err('err1','No existe ninguna sala con ese PIN');return;}
+  if(!d.joinable){err('err1','La partida ya ha empezado');return;}
+  document.getElementById('step1').style.display='none';
+  document.getElementById('step2').style.display='block';
+  document.getElementById('name').focus();
+}
+function enter(){
+  const code=document.getElementById('code').value.trim();
+  const name=document.getElementById('name').value.trim();
+  if(!name){err('err2','Escribe tu nombre');return;}
+  if(!selAvatar){err('err2','Elige un avatar o sube una foto');return;}
+  sessionStorage.setItem('quizly_name',name);
+  sessionStorage.setItem('quizly_avatar',selAvatar);
+  location.href='/play/'+code;
+}
+function err(id,m){document.getElementById(id).innerHTML='<div class="err">'+m+'</div>';}
+
+{% if code and valid %}
+window.addEventListener('DOMContentLoaded',checkCode);
+{% endif %}
+</script>
+</body>
+</html>

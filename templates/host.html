@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<script>try{if((localStorage.getItem('quizly_theme')||'dark')==='light')document.documentElement.classList.add('light');}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#020617">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Sala {{ code }} · Quizly</title>
+<link rel="icon" type="image/png" href="/static/logo_120.png">
+<link rel="stylesheet" href="/static/style.css?v=17">
+<script src="/static/quizly.js?v=17" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+<div class="topbar wrap">
+  <a href="/" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
+  <div class="row" style="align-items:center">
+    <button class="mute-btn" id="muteBtn" onclick="toggleMute()" title="Sonido" aria-label="Activar o silenciar el sonido">🔊</button>
+    <a class="btn ghost" href="/admin">← Panel</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <!-- LOBBY -->
+  <div id="lobby">
+    <div class="card" style="text-align:center">
+      <p class="muted">Entra en <strong id="joinUrl"></strong></p>
+      <div class="pin" id="pin">{{ code }}</div>
+      <div id="qr" class="qrbox" style="margin:14px auto"></div>
+      <p aria-live="polite"><strong id="count">0</strong> jugadores conectados</p>
+      <div class="host-tools">
+        <button class="btn ghost" onclick="toggleProjector()">🖥 Modo proyector</button>
+      </div>
+    </div>
+
+    <div class="card host-config" style="margin-top:16px">
+      <h3>⚙️ Configuración de la partida</h3>
+      <div class="config-grid">
+        <label class="switch"><input type="checkbox" id="cfgTeams" onchange="sendConfig()"> Modo equipos</label>
+        <label class="switch">Nº equipos
+          <select id="cfgNTeams" onchange="sendConfig()" style="width:auto"><option>2</option><option>3</option><option>4</option></select></label>
+        <label class="switch"><input type="checkbox" id="cfgShuffleQ" onchange="sendConfig()"> Barajar preguntas</label>
+        <label class="switch"><input type="checkbox" id="cfgShuffleO" onchange="sendConfig()"> Barajar opciones</label>
+        <label class="switch"><input type="checkbox" id="cfgPower" checked onchange="sendConfig()"> Power-up x2</label>
+      </div>
+    </div>
+
+    <div class="card host-config" style="margin-top:16px">
+      <h3>🎲 Elige el quiz</h3>
+      <div class="row" style="margin-top:10px">
+        <select id="folderSel" onchange="filterQuiz()" style="flex:1"></select>
+        <select id="quizSel" style="flex:2"></select>
+        <button class="btn blue" onclick="loadQuiz()">Cargar</button>
+      </div>
+      <div id="loaded" class="muted" style="margin-top:10px"></div>
+    </div>
+
+    <div id="playersBox"><h3 style="margin-top:18px">Jugadores</h3><div class="players" id="players"></div></div>
+
+    <div style="text-align:center;margin-top:24px">
+      <button class="btn green big" id="startBtn" onclick="doStart()" disabled>▶ Empezar</button>
+    </div>
+  </div>
+
+  <!-- PREGUNTA -->
+  <div id="question" style="display:none">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <span class="muted">Pregunta <span id="qIdx"></span>/<span id="qTotal"></span> · <span class="tag" id="qTypeTag"></span></span>
+        <span class="muted">⏱ <span id="qTime"></span>s · <span id="answered">0</span>/<span id="answeredTot">0</span></span>
+      </div>
+      <div class="qbig" id="qText"></div>
+      <img id="qImg" class="qimg" alt="" style="display:none">
+      <div class="timerbar"><div id="tbar"></div></div>
+      <div id="qOptions"></div>
+      <div style="text-align:center;margin-top:16px">
+        <button class="btn yellow" onclick="send({action:'reveal_now'})">Revelar ya</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVELAR -->
+  <div id="reveal" style="display:none">
+    <div class="card" style="text-align:center">
+      <h2 id="revealCorrect"></h2>
+      <div class="qbig" id="revealQText" style="font-size:1.4rem;margin:6px 0"></div>
+      <div id="distBox"></div>
+      <p class="muted"><span id="revAnswered"></span> respondieron</p>
+      <h3 style="margin-top:18px">🏆 Clasificación</h3>
+      <ol class="lb" id="lbReveal"></ol>
+      <div id="teamReveal"></div>
+      <button class="btn green big" id="nextBtn" style="margin-top:16px" onclick="nextOrEnd()">Siguiente ▶</button>
+    </div>
+  </div>
+
+  <!-- FINAL -->
+  <div id="ended" style="display:none">
+    <div class="card" style="text-align:center">
+      <h2>🎉 ¡Fin del concurso!</h2>
+      <div class="podium" id="podium"></div>
+      <div id="teamFinal"></div>
+      <ol class="lb" id="lbFinal" style="margin-top:30px"></ol>
+      <a class="btn yellow big" href="/admin/results" style="margin-top:20px">Ver informe 📊</a>
+      <a class="btn ghost" href="/admin" style="margin-top:10px">Volver al panel</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const CODE="{{ code }}", QUIZZES={{ quizzes|tojson }};
+const joinFull=location.origin+"/join/"+CODE;
+document.getElementById('joinUrl').textContent=location.host+"/join/"+CODE;
+try{ new QRCode(document.getElementById('qr'),{text:joinFull,width:170,height:170}); }
+catch(e){ document.getElementById('qr').innerHTML='<a href="'+joinFull+'">'+joinFull+'</a>'; }
+
+const folders=[...new Set(QUIZZES.map(q=>q.folder))];
+const fsel=document.getElementById('folderSel');
+fsel.innerHTML='<option value="">Todas las carpetas</option>'+folders.map(t=>'<option>'+t+'</option>').join('');
+function filterQuiz(){ const t=fsel.value; const list=QUIZZES.filter(q=>!t||q.folder===t);
+  document.getElementById('quizSel').innerHTML=list.map(q=>'<option value="'+q.id+'">'+q.title+' ('+q.n+'p)</option>').join(''); }
+filterQuiz();
+
+let hasNext=false;
+const TYPE_LABEL={choice:'Test',truefalse:'V/F',multi:'Múltiple',fill:'Rellenar',numeric:'Numérico',order:'Ordenar'};
+function show(id){['lobby','question','reveal','ended'].forEach(s=>document.getElementById(s).style.display=(s===id?'block':'none'));}
+function toggleProjector(){ document.body.classList.toggle('projector'); }
+function toggleMute(){ const m=Q.toggleMute(); document.getElementById('muteBtn').textContent=m?'🔇':'🔊'; }
+function sendConfig(){ send({action:'config',teams_on:document.getElementById('cfgTeams').checked,
+  n_teams:parseInt(document.getElementById('cfgNTeams').value),
+  shuffle_q:document.getElementById('cfgShuffleQ').checked,
+  shuffle_opts:document.getElementById('cfgShuffleO').checked,
+  powerups:document.getElementById('cfgPower').checked}); }
+function doStart(){ Q.resume(); Q.sfx.start(); send({action:'start'}); }
+
+let ws,tInt;
+function connect(){ ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws/host/'+CODE);
+  ws.onmessage=ev=>handle(JSON.parse(ev.data)); ws.onclose=()=>setTimeout(connect,1500); }
+function send(o){ if(ws&&ws.readyState===1)ws.send(JSON.stringify(o)); }
+function loadQuiz(){ send({action:'load_quiz',quiz_id:parseInt(document.getElementById('quizSel').value)}); }
+function nextOrEnd(){ hasNext?send({action:'next'}):send({action:'end'}); }
+
+function handle(m){
+  if(m.type==='lobby'){
+    document.getElementById('count').textContent=m.count;
+    document.getElementById('players').innerHTML=m.players.map(p=>
+      '<span class="chip">'+Q.avatarHtml(p.avatar)+' '+Q.esc(p.name)+(p.team?' <span class="team-badge">'+p.team+'</span>':'')+'</span>').join('');
+  }
+  else if(m.type==='quiz_loaded'){
+    document.getElementById('loaded').innerHTML='✅ Cargado: <strong>'+Q.esc(m.title)+'</strong> ('+m.n+' preguntas)';
+    document.getElementById('startBtn').disabled=false;
+  }
+  else if(m.type==='host_question'){ renderQuestion(m); }
+  else if(m.type==='progress'){ document.getElementById('answered').textContent=m.answered; }
+  else if(m.type==='host_reveal'){ renderReveal(m); }
+  else if(m.type==='host_end'){ renderEnd(m); }
+}
+
+function renderQuestion(m){
+  show('question'); window._m=m;
+  document.getElementById('qIdx').textContent=m.index; document.getElementById('qTotal').textContent=m.total;
+  document.getElementById('qText').textContent=m.text; document.getElementById('qTime').textContent=m.time;
+  document.getElementById('qTypeTag').textContent=TYPE_LABEL[m.qtype]||m.qtype;
+  document.getElementById('answeredTot').textContent=m.players_total; document.getElementById('answered').textContent=0;
+  const img=document.getElementById('qImg'); if(m.image){img.src=m.image;img.alt='Imagen de la pregunta';img.style.display='block';}else{img.style.display='none';img.alt='';}
+  const opt=document.getElementById('qOptions'); const syms=['▲','◆','●','■'];
+  if(m.qtype==='choice'||m.qtype==='truefalse'||m.qtype==='multi'){
+    opt.className='answers'; opt.innerHTML=m.options.map((o,i)=>'<div class="ans a'+i+'" data-i="'+i+'"><span class="sym">'+syms[i]+'</span>'+Q.esc(o)+'</div>').join('');
+  } else if(m.qtype==='order'){
+    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🔢 Orden correcto: <strong>'+(m.correct_order||[]).join(' → ')+'</strong></p>';
+  } else if(m.qtype==='numeric'){
+    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🎯 Respuesta: <strong>'+m.answer+'</strong></p>';
+  } else {
+    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">✍️ Respuesta: <strong>'+Q.esc(m.answer_text)+'</strong></p>';
+  }
+  runTimer(m.time); Q.sfx.tick();
+}
+function renderReveal(m){
+  clearInterval(tInt); hasNext=m.has_next; const syms=['▲','◆','●','■'];
+  const mm=window._m||{};
+  if(['choice','truefalse','multi'].includes(mm.qtype)){
+    const corr=Array.isArray(m.correct)?m.correct:[m.correct];
+    document.querySelectorAll('#qOptions .ans').forEach(a=>{ if(corr.includes(+a.dataset.i))a.classList.add('correct'); else a.classList.add('dim'); });
+  }
+  // Opciones con texto + conteo + correcta resaltada (para que la clase lo lea en el proyector)
+  const db=document.getElementById('distBox');
+  if(['choice','truefalse','multi'].includes(mm.qtype)){
+    const corr=Array.isArray(m.correct)?m.correct:[m.correct];
+    const dist=m.dist||{}; const maxv=Math.max(1,...Object.values(dist).map(Number));
+    db.innerHTML='<div class="hostopts">'+(mm.options||[]).map((o,i)=>{
+      const c=corr.includes(i), cnt=dist[i]||0;
+      return '<div class="hostopt'+(c?' ok':'')+'"><span class="opt-sym a'+i+'">'+syms[i]+'</span>'+
+        '<span class="ho-text">'+Q.esc(o)+'</span>'+
+        '<span class="ho-bar"><span style="width:'+(cnt/maxv*100)+'%"></span></span>'+
+        '<span class="ho-cnt">'+cnt+(c?' ✓':'')+'</span></div>';
+    }).join('')+'</div>';
+  } else db.innerHTML='';
+  setTimeout(()=>{
+    show('reveal');
+    let ct;
+    if(mm.qtype==='choice'||mm.qtype==='truefalse') ct=(mm.options||[])[m.correct]||'';
+    else if(mm.qtype==='multi') ct=(m.correct||[]).map(i=>(mm.options||[])[i]).join(', ');
+    else if(mm.qtype==='order') ct=(m.correct_order||[]).join(' → ');
+    else ct=m.answer_text;
+    document.getElementById('revealCorrect').textContent='✅ '+ct;
+    document.getElementById('revealQText').textContent=mm.text||'';
+    document.getElementById('revAnswered').textContent=m.answered+'/'+m.total;
+    renderBoard('lbReveal',m.scoreboard);
+    document.getElementById('teamReveal').innerHTML=teamHtml(m.team_board);
+    document.getElementById('nextBtn').textContent=hasNext?'Siguiente ▶':'Ver resultados 🏁';
+  },1200);
+}
+function renderEnd(m){
+  show('ended'); Q.sfx.podium(); Q.confetti();
+  const slots=[1,0,2],cls=['p2','p1','p3'];
+  document.getElementById('podium').innerHTML=slots.map((idx,k)=>{const p=m.podium[idx];if(!p)return'';
+    return '<div class="pod '+cls[k]+'">'+Q.avatarHtml(p.avatar,'av3')+'<strong>'+Q.esc(p.name)+'</strong><div>'+p.score+' pts</div></div>';}).join('');
+  document.getElementById('teamFinal').innerHTML=teamHtml(m.team_board);
+  renderBoard('lbFinal',m.scoreboard);
+}
+function teamHtml(tb){ if(!tb||!tb.length)return'';
+  return '<h3 style="margin-top:20px">Equipos</h3><ol class="lb teamlb">'+tb.map((t,i)=>
+    '<li><span class="pos">'+(i+1)+'</span><span class="av2">'+t.emoji+'</span><span class="nm">'+t.team+' <span class="muted">('+t.members+')</span></span><span class="sc">'+t.score+'</span></li>').join('')+'</ol>'; }
+function renderBoard(id,board){ const medals=['🥇','🥈','🥉'];
+  document.getElementById(id).innerHTML=board.map((p,i)=>'<li><span class="pos">'+(medals[i]||(i+1))+'</span>'+Q.avatarHtml(p.avatar,'av2')+
+    '<span class="nm">'+Q.esc(p.name)+(p.team?' <span class="team-badge">'+p.team+'</span>':'')+(p.streak>1?' 🔥'+p.streak:'')+'</span><span class="sc">'+p.score+'</span></li>').join(''); }
+function runTimer(sec){ const bar=document.getElementById('tbar'); bar.style.transition='none'; bar.style.width='100%';
+  requestAnimationFrame(()=>{bar.style.transition='width '+sec+'s linear';bar.style.width='0%';}); clearInterval(tInt); }
+connect();
+</script>
+</body>
+</html>

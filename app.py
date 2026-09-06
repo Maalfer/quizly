@@ -480,6 +480,13 @@ def correct_repr(q: dict):
     return q.get("answer")
 
 
+def _as_number(v, default):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def player_question_payload(room: Room, q: dict) -> dict:
     total = len(room.quiz["questions"])
     p = {"type": "question", "index": room.q_index + 1, "total": total,
@@ -490,8 +497,8 @@ def player_question_payload(room: Room, q: dict) -> dict:
     elif q["type"] == "truefalse":
         p["options"] = q.get("options", ["Verdadero", "Falso"])
     elif q["type"] == "numeric":
-        p["min"] = q.get("min", 0)
-        p["max"] = q.get("max", 100)
+        p["min"] = _as_number(q.get("min"), 0)
+        p["max"] = _as_number(q.get("max"), 100)
     elif q["type"] == "order":
         items = list(q["items"])
         random.shuffle(items)

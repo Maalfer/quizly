@@ -136,10 +136,10 @@ function renderQuestion(m){
     area.insertAdjacentHTML('beforebegin','');
   } else if(m.qtype==='numeric'){
     area.className='numeric-box';
-    const mid=Math.round((m.min+m.max)/2);
+    const mid=Math.round((Number(m.min)+Number(m.max))/2);
     area.innerHTML='<div class="numeric-val" id="numVal">'+mid+'</div>'+
-      '<input type="range" id="numRange" min="'+m.min+'" max="'+m.max+'" value="'+mid+'" oninput="document.getElementById(\'numVal\').textContent=this.value">'+
-      '<div class="row" style="justify-content:space-between"><span class="muted">'+m.min+'</span><span class="muted">'+m.max+'</span></div>'+
+      '<input type="range" id="numRange" min="'+Q.esc(m.min)+'" max="'+Q.esc(m.max)+'" value="'+mid+'" oninput="document.getElementById(\'numVal\').textContent=this.value">'+
+      '<div class="row" style="justify-content:space-between"><span class="muted">'+Q.esc(m.min)+'</span><span class="muted">'+Q.esc(m.max)+'</span></div>'+
       '<button class="btn green" style="width:100%;margin-top:14px" onclick="sendNumeric()">Responder</button>';
   } else if(m.qtype==='order'){
     area.className=''; orderArr=m.items.slice();

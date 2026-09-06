@@ -274,6 +274,7 @@ TEAMS = [("Rojo", "🔴"), ("Azul", "🔵"), ("Verde", "🟢"), ("Amarillo", "�
 class Room:
     def __init__(self, code: str):
         self.code = code
+        self.owner: Optional[str] = None
         self.players: Dict[str, Player] = {}
         self.host_ws: Optional[WebSocket] = None
         self.state = "lobby"
@@ -739,6 +740,12 @@ def owns_quiz(user: str, role: str, owner: Optional[str]) -> bool:
     return role == "admin" or owner == user or owner is None
 
 
+def owns_room(user: str, role: str, room: "Room") -> bool:
+    """A diferencia de owns_quiz(), una sala sin owner NO se considera de nadie:
+    las salas siempre se crean con owner asignado, así que None es fail-closed."""
+    return role == "admin" or room.owner == user
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request, quizly_session: Optional[str] = Cookie(default=None)):
     user = read_session(quizly_session)
@@ -1107,10 +1114,13 @@ async def result_csv(rid: int, quizly_session: Optional[str] = Cookie(default=No
 # ---- Host / Sala -----------------------------------------------------------
 @app.post("/admin/room/create")
 async def create_room(quizly_session: Optional[str] = Cookie(default=None)):
-    if not read_session(quizly_session):
+    user = read_session(quizly_session)
+    if not user:
         return JSONResponse({"ok": False}, status_code=401)
     code = new_code()
-    ROOMS[code] = Room(code)
+    room = Room(code)
+    room.owner = user
+    ROOMS[code] = room
     return JSONResponse({"ok": True, "code": code})
 
 
@@ -1143,7 +1153,10 @@ async def play_page(request: Request, code: str):
 
 
 @app.get("/api/room/{code}/exists")
-async def room_exists(code: str):
+async def room_exists(code: str, request: Request):
+    if not rate_ok("roomex:" + client_ip(request), 20, 60):
+        return JSONResponse({"exists": False, "joinable": False, "error": "Demasiadas peticiones."},
+                            status_code=429)
     room = ROOMS.get(code)
     return {"exists": room is not None, "joinable": room is not None and room.state == "lobby"}
 
@@ -1368,7 +1381,9 @@ async def api_room_create(request: Request):
     if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     code = new_code()
-    ROOMS[code] = Room(code)
+    room = Room(code)
+    room.owner = a["owner"]
+    ROOMS[code] = room
     host = request.headers.get("host", "quizly.dockerlabs.es")
     base = f"https://{host}"
     return {"ok": True, "code": code, "join_url": f"{base}/join/{code}", "host_url": f"{base}/host/{code}"}
@@ -1376,21 +1391,27 @@ async def api_room_create(request: Request):
 
 @app.get("/api/v1/rooms/{code}")
 async def api_room_state(code: str, request: Request):
-    if not token_owner(request):
+    a = token_owner(request)
+    if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     room = ROOMS.get(code)
     if not room:
         return JSONResponse({"ok": False, "error": "Sala no encontrada."}, status_code=404)
+    if not owns_room(a["owner"], a["role"], room):
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     return _room_state(room)
 
 
 @app.post("/api/v1/rooms/{code}/config")
 async def api_room_config(code: str, request: Request):
-    if not token_owner(request):
+    a = token_owner(request)
+    if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     room = ROOMS.get(code)
     if not room:
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_room(a["owner"], a["role"], room):
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     data = await request.json()
     async with room.lock:
         if room.state == "lobby":
@@ -1413,11 +1434,14 @@ async def api_room_config(code: str, request: Request):
 
 @app.post("/api/v1/rooms/{code}/load")
 async def api_room_load(code: str, request: Request):
-    if not token_owner(request):
+    a = token_owner(request)
+    if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     room = ROOMS.get(code)
     if not room:
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_room(a["owner"], a["role"], room):
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     quiz_id = int((await request.json()).get("quiz_id"))
     async with room.lock:
         res = load_quiz_into_room(room, quiz_id)
@@ -1428,11 +1452,14 @@ async def api_room_load(code: str, request: Request):
 
 
 async def _room_action(code: str, request: Request, action: str):
-    if not token_owner(request):
+    a = token_owner(request)
+    if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     room = ROOMS.get(code)
     if not room:
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_room(a["owner"], a["role"], room):
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     async with room.lock:
         if action == "start" and room.quiz and room.state in ("lobby", "reveal"):
             room.started_at = time.strftime("%Y-%m-%d %H:%M")
@@ -1471,11 +1498,14 @@ async def api_room_end(code: str, request: Request):
 
 @app.post("/api/v1/rooms/{code}/kick")
 async def api_room_kick(code: str, request: Request):
-    if not token_owner(request):
+    a = token_owner(request)
+    if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     room = ROOMS.get(code)
     if not room:
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_room(a["owner"], a["role"], room):
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     pid = (await request.json()).get("pid")
     async with room.lock:
         pl = room.players.pop(pid, None)
@@ -1620,9 +1650,20 @@ async def del_token(request: Request, quizly_session: Optional[str] = Cookie(def
 @app.websocket("/ws/host/{code}")
 async def ws_host(ws: WebSocket, code: str):
     await ws.accept()
+    user = read_session(ws.cookies.get("quizly_session"))
+    if not user:
+        await ws.send_json({"type": "error", "msg": "No autorizado"})
+        await ws.close()
+        return
     room = ROOMS.get(code)
     if not room:
         await ws.send_json({"type": "error", "msg": "Sala no encontrada"})
+        await ws.close()
+        return
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
+    if not owns_room(user, role, room):
+        await ws.send_json({"type": "error", "msg": "No autorizado"})
         await ws.close()
         return
     room.host_ws = ws

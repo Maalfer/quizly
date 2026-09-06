@@ -624,7 +624,11 @@ async def submit_answer(room: Room, player: Player, answer):
 
 def save_result(room: Room):
     try:
-        players = [{"name": p.name, "score": p.score, "team": p.team, "avatar": p.avatar}
+        # La foto subida no se conserva en el histórico: se elimina del disco
+        # en cuanto termina la partida (ver cleanup_uploaded_avatars), así que
+        # tampoco tiene sentido dejar un enlace muerto guardado para siempre.
+        players = [{"name": p.name, "score": p.score, "team": p.team,
+                    "avatar": "" if _AVATAR_UPLOAD_RE.match(p.avatar or "") else p.avatar}
                    for p in sorted(room.players.values(), key=lambda x: x.score, reverse=True)]
         data = {"players": players, "questions": room.stats, "teams": room.team_board(),
                 "teams_on": room.teams_on}
@@ -641,11 +645,28 @@ def save_result(room: Room):
         pass
 
 
+def cleanup_uploaded_avatars(room: Room):
+    """Borra del disco las fotos de perfil subidas (/upload/avatar) por los
+    jugadores de la sala al terminar la partida: ya no se usan en ningún
+    quiz/sala activa, y save_result() no dejó ninguna referencia a ellas en
+    el histórico, así que no hay razón para conservarlas en /static/uploads
+    de forma indefinida."""
+    for p in room.players.values():
+        if p.avatar and _AVATAR_UPLOAD_RE.match(p.avatar):
+            fname = p.avatar.rsplit("/", 1)[-1]
+            path = os.path.join(UPLOAD_DIR, fname)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
 async def end_game(room: Room):
     room.state = "ended"
     podium = room.scoreboard(top=3)
     full = room.scoreboard()
     save_result(room)
+    cleanup_uploaded_avatars(room)
     await room.send_host({"type": "host_end", "podium": podium, "scoreboard": full,
                           "team_board": room.team_board(), "teams_on": room.teams_on})
     for p in room.players.values():

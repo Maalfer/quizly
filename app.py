@@ -250,6 +250,21 @@ def clean_name(name: str) -> str:
     return name
 
 
+_AVATAR_UPLOAD_RE = re.compile(r"^/static/uploads/[0-9a-f]{20}\.(png|jpg|webp|gif)$")
+
+
+def clean_avatar(avatar) -> str:
+    """Solo se acepta un emoji de AVATARS o una ruta propia generada por
+    /upload/avatar (mismo formato que secrets.token_hex(10) + extensión).
+    Cualquier otro valor (URLs externas, data:, etc.) se descarta."""
+    if isinstance(avatar, str):
+        if avatar in AVATARS:
+            return avatar
+        if _AVATAR_UPLOAD_RE.match(avatar):
+            return avatar
+    return random.choice(AVATARS)
+
+
 # ---------------------------------------------------------------------------
 # Estado en memoria de las salas / juego
 # ---------------------------------------------------------------------------
@@ -1744,7 +1759,7 @@ async def ws_play(ws: WebSocket, code: str):
 
     pid = first.get("pid") or secrets.token_hex(8)
     name = clean_name(first.get("name"))
-    avatar = first.get("avatar") or random.choice(AVATARS)
+    avatar = clean_avatar(first.get("avatar"))
     want_team = first.get("team", "")
 
     player = room.players.get(pid)

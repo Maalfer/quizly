@@ -3,10 +3,14 @@
   const Q = window.Q = {};
 
   // --- Avatar: emoji o foto subida ---
-  Q.isImg = a => typeof a==='string' && (a.startsWith('/static/')||a.startsWith('http')||a.startsWith('data:'));
+  // Solo se acepta como imagen una ruta propia /static/uploads/<hash>.<ext>
+  // (el mismo formato que devuelve /upload/avatar). Cualquier otra cosa
+  // (URL externa, data:, etc.) se trata como emoji para no cargar recursos
+  // de terceros ni poder romper el atributo src.
+  Q.isImg = a => typeof a==='string' && /^\/static\/uploads\/[0-9a-f]{20}\.(png|jpg|webp|gif)$/.test(a);
   Q.avatarHtml = (a, cls='') => Q.isImg(a)
-    ? '<img class="av-img '+cls+'" src="'+a+'" alt="">'
-    : '<span class="av-emoji '+cls+'">'+(a||'🦊')+'</span>';
+    ? '<img class="av-img '+cls+'" src="'+Q.esc(a)+'" alt="">'
+    : '<span class="av-emoji '+cls+'">'+Q.esc(a||'🦊')+'</span>';
 
   // --- Sonidos (WebAudio, sin ficheros) ---
   let ctx=null, muted=localStorage.getItem('quizly_muted')==='1';

@@ -625,6 +625,17 @@ async def submit_answer(room: Room, player: Player, answer):
         await reveal_question(room)
 
 
+def csv_safe(value) -> str:
+    """Neutraliza inyección de fórmulas CSV (CWE-1236): si la celda empieza
+    por un carácter que Excel/LibreOffice/Sheets interpretan como inicio de
+    fórmula (=+-@ o tabulador/retorno), se antepone una comilla simple para
+    que se abra como texto literal en vez de ejecutarse como fórmula."""
+    s = str(value)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
+
+
 def save_result(room: Room):
     try:
         # La foto subida no se conserva en el histórico: se elimina del disco
@@ -1211,11 +1222,11 @@ async def result_csv(rid: int, quizly_session: Optional[str] = Cookie(default=No
     w = csv.writer(out)
     w.writerow(["Puesto", "Jugador", "Equipo", "Puntos"])
     for i, p in enumerate(d.get("players", [])):
-        w.writerow([i + 1, p["name"], p.get("team", ""), p["score"]])
+        w.writerow([i + 1, csv_safe(p["name"]), csv_safe(p.get("team", "")), p["score"]])
     w.writerow([])
     w.writerow(["Pregunta", "Tipo", "Respondieron", "Aciertos"])
     for q in d.get("questions", []):
-        w.writerow([q.get("text", ""), q.get("type", ""), q.get("answered", 0), q.get("correct", 0)])
+        w.writerow([csv_safe(q.get("text", "")), q.get("type", ""), q.get("answered", 0), q.get("correct", 0)])
     return Response(out.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="resultado_{rid}.csv"'})
 

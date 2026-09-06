@@ -84,5 +84,10 @@
   // --- PWA --- (v2: el SW ya no cachea HTML; query para saltar la caché de Cloudflare)
   if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js?v=2').catch(()=>{})); }
 
-  Q.esc = s => { const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; };
+  // textContent ya neutraliza &<> para contenido de texto, pero NO las
+  // comillas -- y Q.esc() se usa también dentro de atributos value="..."/
+  // src="...", donde una comilla sin escapar rompe el atributo igualmente.
+  // Se escapan además aquí para que sea segura en ambos contextos.
+  Q.esc = s => { const d=document.createElement('div'); d.textContent=s==null?'':s;
+    return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;'); };
 })();

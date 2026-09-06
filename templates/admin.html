@@ -8,8 +8,8 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <title>Panel · Quizly</title>
 <link rel="icon" type="image/png" href="/static/logo_120.png">
-<link rel="stylesheet" href="/static/style.css?v=17">
-<script src="/static/quizly.js?v=17" defer></script>
+<link rel="stylesheet" href="/static/style.css?v=18">
+<script src="/static/quizly.js?v=18" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main">Saltar al contenido</a>
@@ -210,10 +210,10 @@ function renderBuilder(){
     } else if(q.type==='fill'){
       h+='<div class="field"><span class="field-label">✅ Respuesta correcta</span><input value="'+Q.esc(q.answer)+'" placeholder="palabra o frase" oninput="questions['+i+'].answer=this.value"></div>';
     } else if(q.type==='numeric'){
-      h+='<div class="row"><div class="field" style="flex:1"><span class="field-label">✅ Valor correcto</span><input type="number" value="'+q.answer+'" oninput="questions['+i+'].answer=parseFloat(this.value)"></div>'+
-        '<div class="field" style="flex:1"><span class="field-label">± Tolerancia</span><input type="number" value="'+q.tol+'" oninput="questions['+i+'].tol=parseFloat(this.value)||0"></div></div>'+
-        '<div class="row"><div class="field" style="flex:1"><span class="field-label">Mín (slider)</span><input type="number" value="'+q.min+'" oninput="questions['+i+'].min=parseFloat(this.value)||0"></div>'+
-        '<div class="field" style="flex:1"><span class="field-label">Máx (slider)</span><input type="number" value="'+q.max+'" oninput="questions['+i+'].max=parseFloat(this.value)||100"></div></div>';
+      h+='<div class="row"><div class="field" style="flex:1"><span class="field-label">✅ Valor correcto</span><input type="number" value="'+Q.esc(q.answer)+'" oninput="questions['+i+'].answer=parseFloat(this.value)"></div>'+
+        '<div class="field" style="flex:1"><span class="field-label">± Tolerancia</span><input type="number" value="'+Q.esc(q.tol)+'" oninput="questions['+i+'].tol=parseFloat(this.value)||0"></div></div>'+
+        '<div class="row"><div class="field" style="flex:1"><span class="field-label">Mín (slider)</span><input type="number" value="'+Q.esc(q.min)+'" oninput="questions['+i+'].min=parseFloat(this.value)||0"></div>'+
+        '<div class="field" style="flex:1"><span class="field-label">Máx (slider)</span><input type="number" value="'+Q.esc(q.max)+'" oninput="questions['+i+'].max=parseFloat(this.value)||100"></div></div>';
     } else if(q.type==='order'){
       h+='<div class="field"><span class="field-label">🔢 Elementos EN EL ORDEN CORRECTO (se mostrarán desordenados)</span>';
       q.items.forEach((o,j)=>{h+='<div class="opt"><span class="ord-n">'+(j+1)+'</span>'+
@@ -221,7 +221,7 @@ function renderBuilder(){
         '<button type="button" class="opt-mark" onclick="questions['+i+'].items.splice('+j+',1);renderBuilder()">✕</button></div>';});
       h+='<button class="btn ghost btn-sm" style="margin-top:6px" onclick="questions['+i+'].items.push(\'\');renderBuilder()">＋ Elemento</button></div>';
     }
-    h+='<div class="field"><span class="field-label">⏱ Tiempo (segundos)</span><input type="number" value="'+q.time+'" min="5" max="120" style="max-width:140px" oninput="questions['+i+'].time=parseInt(this.value)||20"></div>';
+    h+='<div class="field"><span class="field-label">⏱ Tiempo (segundos)</span><input type="number" value="'+Q.esc(q.time)+'" min="5" max="120" style="max-width:140px" oninput="questions['+i+'].time=parseInt(this.value)||20"></div>';
     div.innerHTML=h; b.appendChild(div);
   });
   setupDnD();

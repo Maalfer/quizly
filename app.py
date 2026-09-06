@@ -781,12 +781,22 @@ async def create_quiz(request: Request, quizly_session: Optional[str] = Cookie(d
 
 @app.post("/admin/quiz/{quiz_id}/update")
 async def update_quiz(quiz_id: int, request: Request, quizly_session: Optional[str] = Cookie(default=None)):
-    if not read_session(quizly_session):
+    user = read_session(quizly_session)
+    if not user:
         return JSONResponse({"ok": False}, status_code=401)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
     title, theme, kind, folder, questions = _parse_quiz(await request.json())
     if not title or not questions:
         return JSONResponse({"ok": False, "error": "Faltan datos"}, status_code=400)
     conn = db()
+    q = conn.execute("SELECT owner FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
+    if not q:
+        conn.close()
+        return JSONResponse({"ok": False}, status_code=404)
+    if not owns_quiz(user, role, q["owner"]):
+        conn.close()
+        return JSONResponse({"ok": False}, status_code=403)
     cur = conn.execute("UPDATE quizzes SET title=?, theme=?, kind=?, questions=?, folder=? WHERE id=?",
                        (title, theme, kind, json.dumps(questions, ensure_ascii=False), folder, quiz_id))
     conn.commit()
@@ -1140,13 +1150,18 @@ async def room_exists(code: str):
 
 @app.get("/api/quiz/{quiz_id}")
 async def get_quiz(quiz_id: int, quizly_session: Optional[str] = Cookie(default=None)):
-    if not read_session(quizly_session):
+    user = read_session(quizly_session)
+    if not user:
         return JSONResponse({"ok": False}, status_code=401)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
     conn = db()
     q = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
     conn.close()
     if not q:
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_quiz(user, role, q["owner"]):
+        return JSONResponse({"ok": False}, status_code=403)
     return {"ok": True, "title": q["title"], "theme": q["theme"], "kind": q["kind"],
             "folder": q["folder"] or "General", "questions": json.loads(q["questions"])}
 
@@ -1243,6 +1258,8 @@ async def api_get(quiz_id: int, request: Request):
     conn.close()
     if not q:
         return JSONResponse({"ok": False, "error": "No existe."}, status_code=404)
+    if not owns_quiz(a["owner"], a["role"], q["owner"]):
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     return {"ok": True, "quiz": {"id": q["id"], "title": q["title"], "theme": q["theme"],
             "kind": q["kind"], "folder": q["folder"] or "General",
             "questions": json.loads(q["questions"])}}
@@ -1274,6 +1291,13 @@ async def api_update(quiz_id: int, request: Request):
     if not title or not questions:
         return JSONResponse({"ok": False, "error": "Faltan 'title' o 'questions'."}, status_code=400)
     conn = db()
+    q = conn.execute("SELECT owner FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
+    if not q:
+        conn.close()
+        return JSONResponse({"ok": False, "error": "No existe."}, status_code=404)
+    if not owns_quiz(a["owner"], a["role"], q["owner"]):
+        conn.close()
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     cur = conn.execute("UPDATE quizzes SET title=?, theme=?, kind=?, questions=?, folder=? WHERE id=?",
                        (title, theme, kind, json.dumps(questions, ensure_ascii=False), folder, quiz_id))
     conn.commit()
@@ -1288,6 +1312,13 @@ async def api_delete(quiz_id: int, request: Request):
     if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     conn = db()
+    q = conn.execute("SELECT owner FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
+    if not q:
+        conn.close()
+        return JSONResponse({"ok": False, "error": "No existe."}, status_code=404)
+    if not owns_quiz(a["owner"], a["role"], q["owner"]):
+        conn.close()
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     cur = conn.execute("DELETE FROM quizzes WHERE id=?", (quiz_id,))
     conn.commit()
     found = cur.rowcount
@@ -1305,6 +1336,9 @@ async def api_duplicate(quiz_id: int, request: Request):
     if not q:
         conn.close()
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_quiz(a["owner"], a["role"], q["owner"]):
+        conn.close()
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     cur = conn.execute("INSERT INTO quizzes (title, theme, kind, questions, owner, folder) VALUES (?,?,?,?,?,?)",
                        (q["title"] + " (copia)", q["theme"], q["kind"], q["questions"], a["owner"], q["folder"]))
     conn.commit()

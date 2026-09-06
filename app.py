@@ -16,6 +16,7 @@ import asyncio
 import csv
 import io
 import json
+import logging
 import os
 import random
 import re
@@ -27,6 +28,7 @@ import urllib.request
 from contextlib import asynccontextmanager
 from hashlib import sha256
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import (Cookie, FastAPI, File, Form, Request, UploadFile,
                      WebSocket, WebSocketDisconnect)
@@ -51,7 +53,14 @@ DB_CONFIG = {
 }
 UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-SECRET_KEY = os.environ.get("QUIZLY_SECRET", "change-me-quizly-secret-key")
+SECRET_KEY = os.environ.get("QUIZLY_SECRET", "")
+if not SECRET_KEY:
+    # Fallback seguro: si no hay clave configurada, generamos una aleatoria.
+    # No usar jamás un valor hardcodeado (permite falsificar sesiones).
+    SECRET_KEY = secrets.token_hex(32)
+    logging.getLogger("quizly").warning(
+        "QUIZLY_SECRET no configurado: se generó una clave aleatoria. "
+        "Las sesiones se invalidarán en cada reinicio; configura QUIZLY_SECRET.")
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 AI_MODEL = os.environ.get("QUIZLY_AI_MODEL", "claude-sonnet-4-6")
 
@@ -253,6 +262,18 @@ def client_ip(request: Request) -> str:
             or (request.client.host if request.client else "?"))
 
 
+_HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*"
+                      r"(:\d{1,5})?$", re.IGNORECASE)
+
+
+def _host_ok(host: str) -> bool:
+    """Solo hosts/dominios válidos (hostname[:port]); rechaza @, /, caracteres
+    raros o payloads de Host header injection."""
+    if not host or len(host) > 255 or "@" in host or "/" in host or "\\" in host:
+        return False
+    return bool(_HOST_RE.match(host))
+
+
 def clean_name(name: str) -> str:
     name = (name or "Jugador").strip()[:20] or "Jugador"
     low = name.lower()
@@ -381,9 +402,19 @@ class Room:
 ROOMS: Dict[str, Room] = {}
 
 
+MAX_SALAS_POR_USER = 5
+MAX_QUESTIONS = 500
+
+
+def num_salas_activas(owner: str) -> int:
+    return sum(1 for r in ROOMS.values() if r.owner == owner and r.state != "ended")
+
+
 def new_code() -> str:
+    # secrets.choice: código de sala no predecible (random.choices con Mersenne
+    # Twister es adivinable/bruteable).
     while True:
-        code = "".join(random.choices(string.digits, k=6))
+        code = "".join(secrets.choice(string.digits) for _ in range(6))
         if code not in ROOMS:
             return code
 
@@ -805,9 +836,9 @@ async def login_submit(request: Request, username: str = Form(...), password: st
     if not row or row["password"] != hash_pw(password):
         return RedirectResponse("/login?error=1", status_code=303)
     resp = RedirectResponse("/admin", status_code=303)
-    # Recordar sesión 30 días.
+    # Recordar sesión 30 días. Secure: la cookie solo viaja por HTTPS.
     resp.set_cookie("quizly_session", make_session(username), httponly=True,
-                    samesite="lax", max_age=60 * 60 * 24 * 30)
+                    secure=True, samesite="lax", max_age=60 * 60 * 24 * 30)
     return resp
 
 
@@ -868,9 +899,16 @@ async def admin_page(request: Request, quizly_session: Optional[str] = Cookie(de
 
 # ---- CRUD quizzes ----------------------------------------------------------
 def _parse_quiz(data):
+    questions = data.get("questions", [])
+    if not isinstance(questions, list):
+        questions = []
+    # Límite de preguntas: evita payloads gigantes que congelan /admin en
+    # render (parsea todos los quizzes) y los WS de sala.
+    if len(questions) > MAX_QUESTIONS:
+        questions = []
     return (data.get("title", "").strip(), data.get("theme", "General").strip() or "General",
             data.get("kind", "mixto"), data.get("folder", "General").strip() or "General",
-            data.get("questions", []))
+            questions)
 
 
 @app.post("/admin/quiz/new")
@@ -986,14 +1024,26 @@ async def import_quiz(request: Request, quizly_session: Optional[str] = Cookie(d
     user = read_session(quizly_session)
     if not user:
         return JSONResponse({"ok": False}, status_code=401)
-    data = await request.json()
+    # Lee el body acotado por streaming (evita DoS por payload enorme).
+    MAX_BODY = 2 * 1024 * 1024
+    chunks = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_BODY:
+            return JSONResponse({"ok": False, "error": "El archivo es demasiado grande."}, status_code=413)
+        chunks.append(chunk)
+    body = b"".join(chunks)
+    data = json.loads(body)
     payload = data.get("payload")
     if isinstance(payload, str):
         payload = json.loads(payload)
     title = payload.get("title", "Importado").strip() or "Importado"
     questions = payload.get("questions", [])
-    if not questions:
+    if not isinstance(questions, list) or not questions:
         return JSONResponse({"ok": False, "error": "Sin preguntas"}, status_code=400)
+    if len(questions) > MAX_QUESTIONS:
+        return JSONResponse({"ok": False, "error": f"Máximo {MAX_QUESTIONS} preguntas."}, status_code=400)
     conn = db()
     conn.execute("INSERT INTO quizzes (title, theme, kind, questions, owner, folder) VALUES (?,?,?,?,?,?)",
                  (title, payload.get("theme", "General"), payload.get("kind", "mixto"),
@@ -1043,8 +1093,10 @@ def _claude_generate(topic: str, n: int, qtype: str) -> dict:
         if not clean:
             return {"ok": False, "error": "La IA no devolvió preguntas válidas."}
         return {"ok": True, "questions": clean}
-    except Exception as e:  # noqa
-        return {"ok": False, "error": f"Error al llamar a la IA: {e}"}
+    except Exception:  # noqa
+        # Nunca filtrar detalles de la excepción al cliente (puede exponer
+        # claves/stack traces del entorno).
+        return {"ok": False, "error": "No se pudo generar el quiz."}
 
 
 @app.post("/admin/quiz/ai")
@@ -1055,7 +1107,7 @@ async def ai_quiz(request: Request, quizly_session: Optional[str] = Cookie(defau
     if not rate_ok("ai:" + user, 8, 60):
         return JSONResponse({"ok": False, "error": "Demasiadas peticiones, espera un momento."}, status_code=429)
     data = await request.json()
-    topic = (data.get("topic") or "").strip()
+    topic = (data.get("topic") or "").strip()[:300]
     n = max(1, min(15, int(data.get("n", 5))))
     qtype = data.get("qtype", "mixto")
     if not topic:
@@ -1065,6 +1117,21 @@ async def ai_quiz(request: Request, quizly_session: Optional[str] = Cookie(defau
 
 
 # ---- Subida de foto de perfil ---------------------------------------------
+def _sniff_image(raw: bytes) -> Optional[str]:
+    """Detecta el formato real por magic bytes (no por content-type, falsificable).
+    Devuelve la extensión corta o None. Solo se admiten imágenes raster que el
+    cliente renderiza de forma segura (nada de SVG/HTML embebido)."""
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
 @app.post("/upload/avatar")
 async def upload_avatar(request: Request, file: UploadFile = File(...)):
     if not rate_ok("up:" + client_ip(request), 15, 60):
@@ -1072,11 +1139,15 @@ async def upload_avatar(request: Request, file: UploadFile = File(...)):
     ct = file.content_type or ""
     if not ct.startswith("image/"):
         return JSONResponse({"ok": False, "error": "Debe ser una imagen."}, status_code=400)
-    raw = await file.read()
-    if len(raw) > 3 * 1024 * 1024:
+    # Lee con tope (3 MB + holgura): nunca leer un cuerpo arbitrario entero.
+    MT = 3 * 1024 * 1024
+    raw = await file.read(MT + 1)
+    if len(raw) > MT:
         return JSONResponse({"ok": False, "error": "Máximo 3 MB."}, status_code=400)
-    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
-           "image/gif": "gif"}.get(ct, "png")
+    ext = _sniff_image(raw)
+    if not ext:
+        # Nunca guardar ficheros no-imagen (políglotas HTML/JS/SVG, etc.).
+        return JSONResponse({"ok": False, "error": "El contenido no es una imagen válida."}, status_code=400)
     name = secrets.token_hex(10) + "." + ext
     with open(os.path.join(UPLOAD_DIR, name), "wb") as f:
         f.write(raw)
@@ -1244,6 +1315,10 @@ async def create_room(quizly_session: Optional[str] = Cookie(default=None)):
     user = read_session(quizly_session)
     if not user:
         return JSONResponse({"ok": False}, status_code=401)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
+    if role != "admin" and num_salas_activas(user) >= MAX_SALAS_POR_USER:
+        return JSONResponse({"ok": False, "error": "Demasiadas salas activas."}, status_code=429)
     code = new_code()
     room = Room(code)
     room.owner = user
@@ -1259,7 +1334,10 @@ async def host_page(request: Request, code: str, quizly_session: Optional[str] =
     if code not in ROOMS:
         return RedirectResponse("/admin", status_code=303)
     u = get_user(user)
-    rows = visible_quizzes(user, u["role"] if u else "teacher")
+    role = u["role"] if u else "teacher"
+    if not owns_room(user, role, ROOMS[code]):
+        return RedirectResponse("/admin", status_code=303)
+    rows = visible_quizzes(user, role)
     quiz_list = [{"id": q["id"], "title": q["title"], "theme": q["theme"], "kind": q["kind"],
                   "folder": q["folder"] or "General", "n": len(json.loads(q["questions"]))} for q in rows]
     return templates.TemplateResponse("host.html", {"request": request, "code": code, "quizzes": quiz_list})
@@ -1507,11 +1585,17 @@ async def api_room_create(request: Request):
     a = token_owner(request)
     if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
+    if a["role"] != "admin" and num_salas_activas(a["owner"]) >= MAX_SALAS_POR_USER:
+        return JSONResponse({"ok": False, "error": "Demasiadas salas activas."}, status_code=429)
     code = new_code()
     room = Room(code)
     room.owner = a["owner"]
     ROOMS[code] = room
-    host = request.headers.get("host", "quizly.dockerlabs.es")
+    # Host header injection: nunca reflejar el header Host tal cual en URLs de
+    # respuesta (un atacante podría apuntar join_url/host_url a su dominio).
+    host = request.headers.get("host", "")
+    if not _host_ok(host):
+        host = "quizly.dockerlabs.es"
     base = f"https://{host}"
     return {"ok": True, "code": code, "join_url": f"{base}/join/{code}", "host_url": f"{base}/host/{code}"}
 
@@ -1760,8 +1844,13 @@ async def create_token(request: Request, quizly_session: Optional[str] = Cookie(
     if not user:
         return JSONResponse({"ok": False}, status_code=401)
     label = ((await request.json()).get("label") or "Claude Code").strip()[:40]
-    tok = "qz_" + secrets.token_urlsafe(24)
+    # Límite de tokens activos por usuario (evita acumular credenciales eternas).
     conn = db()
+    n = conn.execute("SELECT COUNT(*) FROM api_tokens WHERE owner=?", (user,)).fetchone()[0]
+    if n >= 10:
+        conn.close()
+        return JSONResponse({"ok": False, "error": "Tienes demasiados tokens; borra algunos."}, status_code=429)
+    tok = "qz_" + secrets.token_urlsafe(24)
     conn.execute("INSERT INTO api_tokens (token, owner, label, created_at) VALUES (?,?,?,?)",
                  (tok, user, label, time.strftime("%Y-%m-%d %H:%M")))
     conn.commit()
@@ -1785,9 +1874,31 @@ async def del_token(request: Request, quizly_session: Optional[str] = Cookie(def
 # ---------------------------------------------------------------------------
 # WebSockets
 # ---------------------------------------------------------------------------
+def _ws_origin_ok(ws: WebSocket) -> bool:
+    """Verificación CSWSH: si el cliente manda Origin (navegador), debe ser el
+    mismo host de la app. Herramientas/cliente WS sin navegador no mandan
+    Origin y se permiten (no llevan cookies/CSRF que robar)."""
+    origin = ws.headers.get("origin")
+    if not origin:
+        return True
+    try:
+        o = urlparse(origin)
+    except ValueError:
+        return False
+    if o.scheme not in ("http", "https") or not o.hostname:
+        return False
+    host = (ws.headers.get("host") or "").lower().split(":", 1)[0]
+    return o.hostname.lower() == host or o.hostname.lower() in (
+        "localhost", "127.0.0.1")
+
+
 @app.websocket("/ws/host/{code}")
 async def ws_host(ws: WebSocket, code: str):
     await ws.accept()
+    if not _ws_origin_ok(ws):
+        await ws.send_json({"type": "error", "msg": "Origen no permitido"})
+        await ws.close()
+        return
     user = read_session(ws.cookies.get("quizly_session"))
     if not user:
         await ws.send_json({"type": "error", "msg": "No autorizado"})
@@ -1866,6 +1977,10 @@ async def ws_host(ws: WebSocket, code: str):
 @app.websocket("/ws/play/{code}")
 async def ws_play(ws: WebSocket, code: str):
     await ws.accept()
+    if not _ws_origin_ok(ws):
+        await ws.send_json({"type": "error", "msg": "Origen no permitido"})
+        await ws.close()
+        return
     room = ROOMS.get(code)
     if not room:
         await ws.send_json({"type": "error", "msg": "Sala no encontrada"})

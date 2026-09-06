@@ -387,13 +387,14 @@ def new_code() -> str:
             return code
 
 
-def load_quiz_into_room(room: "Room", quiz_id: int):
+def load_quiz_into_room(room: "Room", quiz_id: int, user: str, role: str):
     """Carga un quiz de la BD en la sala, aplicando barajado si está activo.
-    Devuelve (title, n) o None si no existe."""
+    Devuelve (title, n) o None si no existe o si el quiz no pertenece a quien
+    lo carga (mismo criterio que owns_quiz(): admin carga cualquiera)."""
     conn = db()
     q = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
     conn.close()
-    if not q:
+    if not q or not owns_quiz(user, role, q["owner"]):
         return None
     questions = json.loads(q["questions"])
     if room.shuffle_q:
@@ -1548,7 +1549,7 @@ async def api_room_load(code: str, request: Request):
         return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     quiz_id = int((await request.json()).get("quiz_id"))
     async with room.lock:
-        res = load_quiz_into_room(room, quiz_id)
+        res = load_quiz_into_room(room, quiz_id, a["owner"], a["role"])
     if not res:
         return JSONResponse({"ok": False, "error": "Quiz no encontrado."}, status_code=404)
     await room.send_host({"type": "quiz_loaded", "title": res[0], "n": res[1]})
@@ -1807,7 +1808,7 @@ async def ws_host(ws: WebSocket, code: str):
                         await ws.send_json(room.lobby_payload())
                         await room.broadcast_players(room.lobby_payload())
                 elif action == "load_quiz":
-                    res = load_quiz_into_room(room, int(msg.get("quiz_id")))
+                    res = load_quiz_into_room(room, int(msg.get("quiz_id")), user, role)
                     if res:
                         await ws.send_json({"type": "quiz_loaded", "title": res[0], "n": res[1]})
                 elif action == "start":

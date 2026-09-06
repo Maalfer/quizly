@@ -32,10 +32,11 @@ from urllib.parse import urlparse
 
 from fastapi import (Cookie, FastAPI, File, Form, Request, UploadFile,
                      WebSocket, WebSocketDisconnect)
-from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
-                               RedirectResponse, Response)
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from PIL import Image, ImageOps, UnidentifiedImageError
 from itsdangerous import BadSignature, URLSafeSerializer
 
 import pymysql
@@ -1132,6 +1133,36 @@ def _sniff_image(raw: bytes) -> Optional[str]:
     return None
 
 
+def _sanitize_image(raw: bytes, ext: str) -> Optional[bytes]:
+    """Re-encodifica una imagen para eliminar TODOS los metadatos (EXIF, GPS,
+    fecha de captura, cámara, software, comentarios, hashes embebidos, etc).
+    Aplica la orientación EXIF a los píxeles y guarda de nuevo sin pasar ningún
+    campo de metadatos: Pillow solo conserva lo que se le pasa explícitamente.
+
+    Decodificar+recodificar además descarta cualquier chunk no estándar que se
+    hubiera colado (políglotas, datos anexados) salvo la imagen en sí.
+
+    Devuelve bytes re-encodificados o None si el contenido no es decodificable.
+    """
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img)  # normaliza rotación sin dejar EXIF
+        buf = io.BytesIO()
+        save_opts = {"format": "JPEG" if ext == "jpg" else ext.upper()}
+        if ext in ("jpg", "webp"):
+            save_opts["quality"] = 88
+        if ext == "gif":
+            save_opts["save_all"] = True
+        img.save(buf, **save_opts)
+        out = buf.getvalue()
+        img.close()
+        if not out or len(out) == 0:
+            return None
+        return out
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None
+
+
 @app.post("/upload/avatar")
 async def upload_avatar(request: Request, file: UploadFile = File(...)):
     if not rate_ok("up:" + client_ip(request), 15, 60):
@@ -1148,9 +1179,13 @@ async def upload_avatar(request: Request, file: UploadFile = File(...)):
     if not ext:
         # Nunca guardar ficheros no-imagen (políglotas HTML/JS/SVG, etc.).
         return JSONResponse({"ok": False, "error": "El contenido no es una imagen válida."}, status_code=400)
+    # Re-encode: elimina EXIF/GPS/metadatos y evita guardar el archivo crudo.
+    cleaned = await asyncio.to_thread(_sanitize_image, raw, ext)
+    if not cleaned:
+        return JSONResponse({"ok": False, "error": "El contenido no es una imagen válida."}, status_code=400)
     name = secrets.token_hex(10) + "." + ext
     with open(os.path.join(UPLOAD_DIR, name), "wb") as f:
-        f.write(raw)
+        f.write(cleaned)
     return JSONResponse({"ok": True, "url": "/static/uploads/" + name})
 
 

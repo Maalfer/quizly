@@ -5,3 +5,4 @@ itsdangerous==2.2.0
 python-multipart==0.0.32
 websockets==14.1
 pymysql==1.2.0
+Pillow==11.2.1

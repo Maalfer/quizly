@@ -177,6 +177,7 @@ def init_db():
     # Migraciones suaves
     _add_col(c, "quizzes", "owner", "VARCHAR(190)")
     _add_col(c, "quizzes", "folder", "VARCHAR(255) DEFAULT 'General'")
+    _add_col(c, "results", "owner", "VARCHAR(190)")
     # Solo crea el admin por defecto si NO existe ningún administrador
     # (así, tras renombrar/cambiar el admin, un reinicio no recrea 'admin').
     if not c.execute("SELECT id FROM users WHERE role='admin'").fetchone():
@@ -619,10 +620,12 @@ def save_result(room: Room):
         data = {"players": players, "questions": room.stats, "teams": room.team_board(),
                 "teams_on": room.teams_on}
         conn = db()
-        conn.execute("INSERT INTO results (code, quiz_title, theme, mode, started_at, ended_at, data) VALUES (?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO results (code, quiz_title, theme, mode, started_at, ended_at, data, owner) "
+                     "VALUES (?,?,?,?,?,?,?,?)",
                      (room.code, room.quiz.get("title", "?") if room.quiz else "?",
                       room.quiz.get("theme", "") if room.quiz else "", "live",
-                      room.started_at, time.strftime("%Y-%m-%d %H:%M"), json.dumps(data, ensure_ascii=False)))
+                      room.started_at, time.strftime("%Y-%m-%d %H:%M"), json.dumps(data, ensure_ascii=False),
+                      room.owner))
         conn.commit()
         conn.close()
     except Exception:
@@ -763,6 +766,13 @@ def owns_room(user: str, role: str, room: "Room") -> bool:
     """A diferencia de owns_quiz(), una sala sin owner NO se considera de nadie:
     las salas siempre se crean con owner asignado, así que None es fail-closed."""
     return role == "admin" or room.owner == user
+
+
+def owns_result(user: str, role: str, owner: Optional[str]) -> bool:
+    """Mismo criterio que owns_quiz(): los resultados guardados antes de que
+    `results` tuviera columna owner se quedan sin dueño (None) y siguen
+    siendo visibles para cualquier profesor, como el resto de datos legacy."""
+    return owns_quiz(user, role, owner)
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -1079,10 +1089,19 @@ async def del_teacher(request: Request, quizly_session: Optional[str] = Cookie(d
 # ---- Resultados / historial ------------------------------------------------
 @app.get("/admin/results", response_class=HTMLResponse)
 async def results_page(request: Request, quizly_session: Optional[str] = Cookie(default=None)):
-    if not read_session(quizly_session):
+    user = read_session(quizly_session)
+    if not user:
         return RedirectResponse("/login", status_code=303)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
     conn = db()
-    rows = conn.execute("SELECT id, quiz_title, theme, mode, ended_at, data FROM results ORDER BY id DESC LIMIT 100").fetchall()
+    if role == "admin":
+        rows = conn.execute(
+            "SELECT id, quiz_title, theme, mode, ended_at, data FROM results ORDER BY id DESC LIMIT 100").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, quiz_title, theme, mode, ended_at, data FROM results "
+            "WHERE owner=? OR owner IS NULL ORDER BY id DESC LIMIT 100", (user,)).fetchall()
     conn.close()
     items = []
     for r in rows:
@@ -1096,12 +1115,17 @@ async def results_page(request: Request, quizly_session: Optional[str] = Cookie(
 
 @app.get("/admin/results/{rid}", response_class=HTMLResponse)
 async def result_detail(rid: int, request: Request, quizly_session: Optional[str] = Cookie(default=None)):
-    if not read_session(quizly_session):
+    user = read_session(quizly_session)
+    if not user:
         return RedirectResponse("/login", status_code=303)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
     conn = db()
     r = conn.execute("SELECT * FROM results WHERE id=?", (rid,)).fetchone()
     conn.close()
     if not r:
+        return RedirectResponse("/admin/results", status_code=303)
+    if not owns_result(user, role, r["owner"]):
         return RedirectResponse("/admin/results", status_code=303)
     d = json.loads(r["data"])
     return templates.TemplateResponse("result_detail.html", {"request": request, "r": dict(r), "d": d})
@@ -1109,13 +1133,18 @@ async def result_detail(rid: int, request: Request, quizly_session: Optional[str
 
 @app.get("/admin/results/{rid}/csv")
 async def result_csv(rid: int, quizly_session: Optional[str] = Cookie(default=None)):
-    if not read_session(quizly_session):
+    user = read_session(quizly_session)
+    if not user:
         return JSONResponse({"ok": False}, status_code=401)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
     conn = db()
     r = conn.execute("SELECT * FROM results WHERE id=?", (rid,)).fetchone()
     conn.close()
     if not r:
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_result(user, role, r["owner"]):
+        return JSONResponse({"ok": False}, status_code=403)
     d = json.loads(r["data"])
     out = io.StringIO()
     w = csv.writer(out)
@@ -1541,10 +1570,17 @@ async def api_room_kick(code: str, request: Request):
 # ---- API: resultados / analítica ------------------------------------------
 @app.get("/api/v1/results")
 async def api_results(request: Request):
-    if not token_owner(request):
+    a = token_owner(request)
+    if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     conn = db()
-    rows = conn.execute("SELECT id, quiz_title, theme, mode, ended_at, data FROM results ORDER BY id DESC LIMIT 200").fetchall()
+    if a["role"] == "admin":
+        rows = conn.execute(
+            "SELECT id, quiz_title, theme, mode, ended_at, data FROM results ORDER BY id DESC LIMIT 200").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, quiz_title, theme, mode, ended_at, data FROM results "
+            "WHERE owner=? OR owner IS NULL ORDER BY id DESC LIMIT 200", (a["owner"],)).fetchall()
     conn.close()
     out = []
     for r in rows:
@@ -1557,13 +1593,16 @@ async def api_results(request: Request):
 
 @app.get("/api/v1/results/{rid}")
 async def api_result_detail(rid: int, request: Request):
-    if not token_owner(request):
+    a = token_owner(request)
+    if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
     conn = db()
     r = conn.execute("SELECT * FROM results WHERE id=?", (rid,)).fetchone()
     conn.close()
     if not r:
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_result(a["owner"], a["role"], r["owner"]):
+        return JSONResponse({"ok": False, "error": "No autorizado."}, status_code=403)
     return {"ok": True, "result": {"id": r["id"], "title": r["quiz_title"], "theme": r["theme"],
             "mode": r["mode"], "ended_at": r["ended_at"], "data": json.loads(r["data"])}}
 

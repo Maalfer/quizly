@@ -734,6 +734,11 @@ def visible_quizzes(user: str, role: str):
     return rows
 
 
+def owns_quiz(user: str, role: str, owner: Optional[str]) -> bool:
+    """Autorización a nivel de objeto: mismo criterio que visible_quizzes()."""
+    return role == "admin" or owner == user or owner is None
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request, quizly_session: Optional[str] = Cookie(default=None)):
     user = read_session(quizly_session)
@@ -792,9 +797,19 @@ async def update_quiz(quiz_id: int, request: Request, quizly_session: Optional[s
 
 @app.post("/admin/quiz/{quiz_id}/delete")
 async def delete_quiz(quiz_id: int, quizly_session: Optional[str] = Cookie(default=None)):
-    if not read_session(quizly_session):
+    user = read_session(quizly_session)
+    if not user:
         return JSONResponse({"ok": False}, status_code=401)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
     conn = db()
+    q = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
+    if not q:
+        conn.close()
+        return JSONResponse({"ok": False}, status_code=404)
+    if not owns_quiz(user, role, q["owner"]):
+        conn.close()
+        return JSONResponse({"ok": False}, status_code=403)
     conn.execute("DELETE FROM quizzes WHERE id=?", (quiz_id,))
     conn.commit()
     conn.close()
@@ -806,11 +821,16 @@ async def duplicate_quiz(quiz_id: int, quizly_session: Optional[str] = Cookie(de
     user = read_session(quizly_session)
     if not user:
         return JSONResponse({"ok": False}, status_code=401)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
     conn = db()
     q = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
     if not q:
         conn.close()
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_quiz(user, role, q["owner"]):
+        conn.close()
+        return JSONResponse({"ok": False}, status_code=403)
     conn.execute("INSERT INTO quizzes (title, theme, kind, questions, owner, folder) VALUES (?,?,?,?,?,?)",
                  (q["title"] + " (copia)", q["theme"], q["kind"], q["questions"], user, q["folder"]))
     conn.commit()
@@ -820,13 +840,18 @@ async def duplicate_quiz(quiz_id: int, quizly_session: Optional[str] = Cookie(de
 
 @app.get("/admin/quiz/{quiz_id}/export")
 async def export_quiz(quiz_id: int, quizly_session: Optional[str] = Cookie(default=None)):
-    if not read_session(quizly_session):
+    user = read_session(quizly_session)
+    if not user:
         return JSONResponse({"ok": False}, status_code=401)
+    u = get_user(user)
+    role = u["role"] if u else "teacher"
     conn = db()
     q = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
     conn.close()
     if not q:
         return JSONResponse({"ok": False}, status_code=404)
+    if not owns_quiz(user, role, q["owner"]):
+        return JSONResponse({"ok": False}, status_code=403)
     payload = {"title": q["title"], "theme": q["theme"], "kind": q["kind"],
                "folder": q["folder"], "questions": json.loads(q["questions"])}
     fn = re.sub(r"[^a-zA-Z0-9_-]+", "_", q["title"])[:40]

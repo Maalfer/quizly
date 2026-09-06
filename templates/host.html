@@ -114,11 +114,20 @@ document.getElementById('joinUrl').textContent=location.host+"/join/"+CODE;
 try{ new QRCode(document.getElementById('qr'),{text:joinFull,width:170,height:170}); }
 catch(e){ document.getElementById('qr').innerHTML='<a href="'+joinFull+'">'+joinFull+'</a>'; }
 
+// Construidos con la API del DOM (textContent, no innerHTML): no dependen de
+// Q.esc (que puede no estar cargado aún, el <script> de quizly.js es defer) y
+// quedan a salvo de inyección de HTML/atributos pase lo que pase en el valor.
 const folders=[...new Set(QUIZZES.map(q=>q.folder))];
 const fsel=document.getElementById('folderSel');
-fsel.innerHTML='<option value="">Todas las carpetas</option>'+folders.map(t=>'<option>'+t+'</option>').join('');
-function filterQuiz(){ const t=fsel.value; const list=QUIZZES.filter(q=>!t||q.folder===t);
-  document.getElementById('quizSel').innerHTML=list.map(q=>'<option value="'+q.id+'">'+q.title+' ('+q.n+'p)</option>').join(''); }
+fsel.innerHTML='';
+const allOpt=document.createElement('option'); allOpt.value=''; allOpt.textContent='Todas las carpetas';
+fsel.appendChild(allOpt);
+folders.forEach(t=>{ const o=document.createElement('option'); o.textContent=t; fsel.appendChild(o); });
+function filterQuiz(){
+  const t=fsel.value; const list=QUIZZES.filter(q=>!t||q.folder===t);
+  const sel=document.getElementById('quizSel'); sel.innerHTML='';
+  list.forEach(q=>{ const o=document.createElement('option'); o.value=q.id; o.textContent=q.title+' ('+q.n+'p)'; sel.appendChild(o); });
+}
 filterQuiz();
 
 let hasNext=false;
@@ -167,9 +176,9 @@ function renderQuestion(m){
   if(m.qtype==='choice'||m.qtype==='truefalse'||m.qtype==='multi'){
     opt.className='answers'; opt.innerHTML=m.options.map((o,i)=>'<div class="ans a'+i+'" data-i="'+i+'"><span class="sym">'+syms[i]+'</span>'+Q.esc(o)+'</div>').join('');
   } else if(m.qtype==='order'){
-    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🔢 Orden correcto: <strong>'+(m.correct_order||[]).join(' → ')+'</strong></p>';
+    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🔢 Orden correcto: <strong>'+(m.correct_order||[]).map(Q.esc).join(' → ')+'</strong></p>';
   } else if(m.qtype==='numeric'){
-    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🎯 Respuesta: <strong>'+m.answer+'</strong></p>';
+    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🎯 Respuesta: <strong>'+Q.esc(String(m.answer))+'</strong></p>';
   } else {
     opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">✍️ Respuesta: <strong>'+Q.esc(m.answer_text)+'</strong></p>';
   }

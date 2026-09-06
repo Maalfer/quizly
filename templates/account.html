@@ -24,10 +24,10 @@
 
     <div id="tokenList" style="margin:12px 0">
       {% for t in tokens %}
-      <div class="row" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:10px 0" data-t="{{ t.token }}">
-        <div><strong>{{ t.label }}</strong> <code class="muted">{{ t.token[:10] }}…</code>
+      <div class="row" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:10px 0" data-tid="{{ t.id }}">
+        <div><strong>{{ t.label }}</strong> <code class="muted">{{ t.preview }}…</code>
           <div class="muted" style="font-size:.8rem">creado {{ t.created_at }}{% if t.last_used %} · usado {{ t.last_used }}{% endif %}</div></div>
-        <button class="btn ghost btn-sm" onclick="delToken('{{ t.token }}')" aria-label="Revocar token">🗑 Revocar</button>
+        <button class="btn ghost btn-sm" onclick="delToken({{ t.id }})" aria-label="Revocar token">🗑 Revocar</button>
       </div>
       {% endfor %}
       {% if not tokens %}<p class="muted" id="noTok">Aún no tienes tokens.</p>{% endif %}
@@ -149,8 +149,8 @@ async function genToken(){
       '<button class="btn ghost btn-sm" onclick="navigator.clipboard.writeText(\''+d.token+'\')">Copiar</button></div>';
   } else document.getElementById('tokFresh').innerHTML='<div class="err">Error</div>';
 }
-async function delToken(t){ if(!confirm('¿Revocar este token? Dejará de funcionar.'))return;
-  await fetch('/admin/account/token/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})});
+async function delToken(id){ if(!confirm('¿Revocar este token? Dejará de funcionar.'))return;
+  await fetch('/admin/account/token/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   location.reload();
 }
 

@@ -179,6 +179,7 @@ def init_db():
     _add_col(c, "quizzes", "folder", "VARCHAR(255) DEFAULT 'General'")
     _add_col(c, "results", "owner", "VARCHAR(190)")
     _add_col(c, "users", "session_epoch", "INT NOT NULL DEFAULT 0")
+    _add_col(c, "api_tokens", "id", "INT AUTO_INCREMENT UNIQUE")
     # Solo crea el admin por defecto si NO existe ningún administrador
     # (así, tras renombrar/cambiar el admin, un reinicio no recrea 'admin').
     if not c.execute("SELECT id FROM users WHERE role='admin'").fetchone():
@@ -1076,8 +1077,11 @@ async def account_page(request: Request, quizly_session: Optional[str] = Cookie(
     teachers = []
     if role == "admin":
         teachers = [dict(r) for r in conn.execute("SELECT username, role FROM users ORDER BY username").fetchall()]
+    # El token completo NUNCA vuelve a enviarse al navegador tras su creación:
+    # solo un id opaco (para poder revocarlo) y una vista previa truncada.
     tokens = [dict(r) for r in conn.execute(
-        "SELECT token, label, created_at, last_used FROM api_tokens WHERE owner=? ORDER BY created_at DESC",
+        "SELECT id, label, created_at, last_used, LEFT(token, 10) AS preview "
+        "FROM api_tokens WHERE owner=? ORDER BY created_at DESC",
         (user,)).fetchall()]
     conn.close()
     return templates.TemplateResponse("account.html", {"request": request, "user": user,
@@ -1752,9 +1756,9 @@ async def del_token(request: Request, quizly_session: Optional[str] = Cookie(def
     user = read_session(quizly_session)
     if not user:
         return JSONResponse({"ok": False}, status_code=401)
-    tok = (await request.json()).get("token", "")
+    tid = (await request.json()).get("id")
     conn = db()
-    conn.execute("DELETE FROM api_tokens WHERE token=? AND owner=?", (tok, user))
+    conn.execute("DELETE FROM api_tokens WHERE id=? AND owner=?", (tid, user))
     conn.commit()
     conn.close()
     return {"ok": True}

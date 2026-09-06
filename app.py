@@ -178,6 +178,7 @@ def init_db():
     _add_col(c, "quizzes", "owner", "VARCHAR(190)")
     _add_col(c, "quizzes", "folder", "VARCHAR(255) DEFAULT 'General'")
     _add_col(c, "results", "owner", "VARCHAR(190)")
+    _add_col(c, "users", "session_epoch", "INT NOT NULL DEFAULT 0")
     # Solo crea el admin por defecto si NO existe ningún administrador
     # (así, tras renombrar/cambiar el admin, un reinicio no recrea 'admin').
     if not c.execute("SELECT id FROM users WHERE role='admin'").fetchone():
@@ -680,16 +681,37 @@ async def end_game(room: Room):
 # Auth
 # ---------------------------------------------------------------------------
 def make_session(username: str) -> str:
-    return serializer.dumps({"u": username})
+    u = get_user(username)
+    epoch = u["session_epoch"] if u else 0
+    return serializer.dumps({"u": username, "v": epoch})
 
 
 def read_session(token: Optional[str]) -> Optional[str]:
+    """Además de comprobar la firma, valida que el token siga en la misma
+    "época" de sesión del usuario -- logout y cambio de contraseña
+    incrementan session_epoch, lo que invalida de inmediato en el servidor
+    cualquier cookie firmada anterior, en vez de confiar solo en que el
+    cliente la borre."""
     if not token:
         return None
     try:
-        return serializer.loads(token).get("u")
+        data = serializer.loads(token)
     except BadSignature:
         return None
+    username = data.get("u")
+    if not username:
+        return None
+    u = get_user(username)
+    if not u or u["session_epoch"] != data.get("v", 0):
+        return None
+    return username
+
+
+def bump_session_epoch(username: str):
+    conn = db()
+    conn.execute("UPDATE users SET session_epoch = session_epoch + 1 WHERE username=?", (username,))
+    conn.commit()
+    conn.close()
 
 
 def get_user(username: str):
@@ -770,7 +792,10 @@ async def login_submit(request: Request, username: str = Form(...), password: st
 
 
 @app.get("/logout")
-async def logout():
+async def logout(quizly_session: Optional[str] = Cookie(default=None)):
+    user = read_session(quizly_session)
+    if user:
+        bump_session_epoch(user)
     resp = RedirectResponse("/", status_code=303)
     resp.delete_cookie("quizly_session")
     return resp
@@ -1074,6 +1099,7 @@ async def change_password(request: Request, quizly_session: Optional[str] = Cook
     conn.execute("UPDATE users SET password=? WHERE username=?", (hash_pw(new), user))
     conn.commit()
     conn.close()
+    bump_session_epoch(user)
     return JSONResponse({"ok": True})
 
 
@@ -1700,6 +1726,7 @@ async def api_password(request: Request):
     conn.execute("UPDATE users SET password=? WHERE username=?", (hash_pw(new), a["owner"]))
     conn.commit()
     conn.close()
+    bump_session_epoch(a["owner"])
     return {"ok": True}
 
 

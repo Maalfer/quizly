@@ -85,6 +85,7 @@ const AVATAR=sessionStorage.getItem('quizly_avatar')||'🦊';
 const TEAM=sessionStorage.getItem('quizly_team_'+CODE)||'';
 if(!NAME){ location.href='/join/'+CODE; }
 let PID=sessionStorage.getItem('quizly_pid_'+CODE)||null;
+let TOKEN=sessionStorage.getItem('quizly_ptok_'+CODE)||null;
 
 window.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('meAv').innerHTML=Q.avatarHtml(AVATAR);
@@ -97,12 +98,12 @@ function toggleMute(){ const m=Q.toggleMute(); document.getElementById('muteBtn'
 
 let ws,tInt,answered=false,curType=null,orderArr=[],multiSel=[],boostArmed=false,lastQ=null,myAnswer=null;
 function connect(){ ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws/play/'+CODE);
-  ws.onopen=()=>ws.send(JSON.stringify({action:'join',name:NAME,avatar:AVATAR,team:TEAM,pid:PID}));
+  ws.onopen=()=>ws.send(JSON.stringify({action:'join',name:NAME,avatar:AVATAR,team:TEAM,pid:PID,token:TOKEN}));
   ws.onmessage=ev=>handle(JSON.parse(ev.data)); ws.onclose=()=>setTimeout(connect,1500); }
 function send(o){ if(ws&&ws.readyState===1)ws.send(JSON.stringify(o)); }
 
 function handle(m){
-  if(m.type==='joined'){ PID=m.pid; sessionStorage.setItem('quizly_pid_'+CODE,PID);
+  if(m.type==='joined'){ PID=m.pid; TOKEN=m.token; sessionStorage.setItem('quizly_pid_'+CODE,PID); sessionStorage.setItem('quizly_ptok_'+CODE,TOKEN);
     if(m.team){ sessionStorage.setItem('quizly_team_'+CODE,m.team);
       document.getElementById('meTeam').innerHTML='<span class="team-badge">Equipo '+m.team+'</span>'; } }
   else if(m.type==='error'){ document.getElementById('wait').innerHTML='<div class="card" style="text-align:center"><h2>😕 '+Q.esc(m.msg)+'</h2><a class="btn yellow" href="/join" style="margin-top:16px">Volver</a></div>'; show('wait'); }

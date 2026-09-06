@@ -271,6 +271,10 @@ def clean_avatar(avatar) -> str:
 class Player:
     def __init__(self, pid: str, name: str, avatar: str, team: str = ""):
         self.pid = pid
+        # Secreto de reconexión: solo se envía una vez, directo al propio jugador
+        # en el "joined" -- nunca en lobby_payload()/scoreboard()/broadcasts, a
+        # diferencia del pid (que sí es público entre jugadores de la sala).
+        self.token = secrets.token_hex(16)
         self.name = name
         self.avatar = avatar
         self.team = team
@@ -1757,12 +1761,19 @@ async def ws_play(ws: WebSocket, code: str):
         await ws.close()
         return
 
-    pid = first.get("pid") or secrets.token_hex(8)
+    req_pid = first.get("pid")
+    req_token = first.get("token")
     name = clean_name(first.get("name"))
     avatar = clean_avatar(first.get("avatar"))
     want_team = first.get("team", "")
 
-    player = room.players.get(pid)
+    player = room.players.get(req_pid) if req_pid else None
+    if player is not None and player.token != req_token:
+        # El pid es público (viaja en lobby_payload a toda la sala), pero el
+        # token de reconexión no. Sin el token correcto no se concede la
+        # identidad ajena: se trata como una incorporación nueva.
+        player = None
+
     if player is None:
         if room.state != "lobby":
             await ws.send_json({"type": "error", "msg": "La partida ya ha empezado"})
@@ -1777,12 +1788,13 @@ async def ws_play(ws: WebSocket, code: str):
         if room.teams_on:
             valid_teams = [TEAMS[k][0] for k in range(room.n_teams)]
             team = want_team if want_team in valid_teams else room.team_assign()
+        pid = secrets.token_hex(8)
         player = Player(pid, name, avatar, team)
         room.players[pid] = player
     player.ws = ws
 
-    await ws.send_json({"type": "joined", "pid": pid, "name": player.name, "avatar": player.avatar,
-                        "team": player.team, "state": room.state})
+    await ws.send_json({"type": "joined", "pid": player.pid, "token": player.token, "name": player.name,
+                        "avatar": player.avatar, "team": player.team, "state": room.state})
     async with room.lock:
         await room.send_host(room.lobby_payload())
         await room.broadcast_players(room.lobby_payload())

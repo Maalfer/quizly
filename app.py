@@ -238,7 +238,16 @@ def rate_ok(key: str, limit: int, window: float) -> bool:
 
 
 def client_ip(request: Request) -> str:
-    return (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    """IP real del visitante para rate limiting. NUNCA confiar en X-Forwarded-For
+    a secas: es la propia cabecera que el cliente controla y basta con rotarla
+    en cada petición para que rate_ok() indexe un contador distinto cada vez.
+    CF-Connecting-IP la fija Cloudflare en su borde (la app está detrás de
+    Cloudflare) y sobrescribe cualquier valor que el cliente intente enviar
+    con ese mismo nombre -- no es falsificable. X-Real-IP (definida por nginx
+    a partir de $remote_addr) queda como respaldo si algún día no hay CDN
+    delante."""
+    return (request.headers.get("cf-connecting-ip", "").strip()
+            or request.headers.get("x-real-ip", "").strip()
             or (request.client.host if request.client else "?"))
 
 

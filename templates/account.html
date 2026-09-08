@@ -67,7 +67,7 @@
       {% for t in teachers %}
       <div class="row" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:8px 0" data-u="{{ t.username }}">
         <span>👤 {{ t.username }} <span class="team-badge">{{ t.role }}</span></span>
-        {% if t.role != 'admin' %}<button class="btn ghost btn-sm" onclick="delTeacher('{{ t.username }}')" aria-label="Eliminar profesor">🗑</button>{% endif %}
+        {% if t.role != 'admin' %}<button class="btn ghost btn-sm" onclick='delTeacher({{ t.username|tojson }})' aria-label="Eliminar profesor">🗑</button>{% endif %}
       </div>
       {% endfor %}
     </div>

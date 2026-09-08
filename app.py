@@ -1192,6 +1192,17 @@ async def upload_avatar(request: Request, file: UploadFile = File(...)):
 
 
 # ---- Cuenta / profesores ---------------------------------------------------
+def _safe_username(un: str) -> bool:
+    """Valida el conjunto de caracteres del nombre de usuario (alta de
+    profesores): letras/números (incl. acentos) y separadores comunes, sin
+    espacios ni caracteres de control. El renderizado JS (onclick) está
+    protegido con |tojson, pero restringir el charset aquí evita almacenar
+    payloads de XSS en users."""
+    if not 1 <= len(un) <= 64:
+        return False
+    return all(c.isalnum() or c in "._@+-" for c in un)
+
+
 @app.get("/admin/account", response_class=HTMLResponse)
 async def account_page(request: Request, quizly_session: Optional[str] = Cookie(default=None)):
     user = read_session(quizly_session)
@@ -1245,6 +1256,8 @@ async def add_teacher(request: Request, quizly_session: Optional[str] = Cookie(d
     pw = data.get("password") or ""
     if not un or len(pw) < 4:
         return JSONResponse({"ok": False, "error": "Usuario y contraseña (mín 4) requeridos."}, status_code=400)
+    if not _safe_username(un):
+        return JSONResponse({"ok": False, "error": "El nombre de usuario solo puede contener letras, números y . _ @ + -"}, status_code=400)
     conn = db()
     try:
         conn.execute("INSERT INTO users (username, password, role) VALUES (?,?,?)",
@@ -1829,6 +1842,8 @@ async def api_teacher_add(request: Request):
     pw = data.get("password") or ""
     if not un or len(pw) < 4:
         return JSONResponse({"ok": False, "error": "username y password (mín 4)."}, status_code=400)
+    if not _safe_username(un):
+        return JSONResponse({"ok": False, "error": "El nombre de usuario solo puede contener letras, números y . _ @ + -"}, status_code=400)
     conn = db()
     try:
         conn.execute("INSERT INTO users (username, password, role) VALUES (?,?,?)", (un, hash_pw(pw), "teacher"))

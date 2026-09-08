@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 from fastapi import (Cookie, FastAPI, File, Form, Request, UploadFile,
                      WebSocket, WebSocketDisconnect)
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
-                               RedirectResponse)
+                               RedirectResponse, Response)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -876,10 +876,12 @@ def owns_room(user: str, role: str, room: "Room") -> bool:
 
 
 def owns_result(user: str, role: str, owner: Optional[str]) -> bool:
-    """Mismo criterio que owns_quiz(): los resultados guardados antes de que
-    `results` tuviera columna owner se quedan sin dueño (None) y siguen
-    siendo visibles para cualquier profesor, como el resto de datos legacy."""
-    return owns_quiz(user, role, owner)
+    """Mismo criterio que owns_room() (fail-closed): un resultado sin owner
+    NO se considera de nadie. Los resultados contienen datos de alumnos y el
+    histórico siempre se genera desde una sala con owner asignado, así que
+    None solo aparece en filas legacy y debe quedar visible únicamente para
+    admin (que ve todo). Un resultado sin dueño no es un "banco compartido"."""
+    return role == "admin" or owner == user
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -1286,7 +1288,7 @@ async def results_page(request: Request, quizly_session: Optional[str] = Cookie(
     else:
         rows = conn.execute(
             "SELECT id, quiz_title, theme, mode, ended_at, data FROM results "
-            "WHERE owner=? OR owner IS NULL ORDER BY id DESC LIMIT 100", (user,)).fetchall()
+            "WHERE owner=? ORDER BY id DESC LIMIT 100", (user,)).fetchall()
     conn.close()
     items = []
     for r in rows:
@@ -1778,7 +1780,7 @@ async def api_results(request: Request):
     else:
         rows = conn.execute(
             "SELECT id, quiz_title, theme, mode, ended_at, data FROM results "
-            "WHERE owner=? OR owner IS NULL ORDER BY id DESC LIMIT 200", (a["owner"],)).fetchall()
+            "WHERE owner=? ORDER BY id DESC LIMIT 200", (a["owner"],)).fetchall()
     conn.close()
     out = []
     for r in rows:

@@ -307,6 +307,33 @@ def clean_avatar(avatar) -> str:
     return random.choice(AVATARS)
 
 
+# data:image/(png|jpeg|gif|webp);base64,<...>. Sin SVG (vector con JS embebido
+# serviría como XSS en <img src>) y sin más schemes (http:, https:, javascript:,
+# vbscript:, file:) para no abrir un canal de tracking / exfil al renderizar la
+# pregunta en el navegador de cada alumno.
+_IMG_DATA_RE = re.compile(r"^data:image/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$")
+
+
+def clean_image(url) -> str:
+    """Imagen de pregunta: solo se acepta una ruta propia del estilo de los
+    avatares subidos o un data-URI de imagen raster base64. Cualquier otra
+    cosa (URLs externas http(s)://, javascript:, data: svg, etc.) se descarta
+    a cadena vacía para que el cliente no asigne img.src a un recurso de
+    terceros que filtre IP / ejecute JS en el navegador de los alumnos.
+
+    Si en el futuro se quieren permitir imágenes remotas, deberían ir por un
+    endpoint /upload/quiz-image que las descargue, las re-encode con Pillow
+    (igual que el avatar) y las sirva desde /static/uploads/<hash>.<ext>, y
+    entonces este helper solo aceptaría ese formato."""
+    if not isinstance(url, str):
+        return ""
+    if _AVATAR_UPLOAD_RE.match(url):
+        return url
+    if _IMG_DATA_RE.match(url):
+        return url
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Estado en memoria de las salas / juego
 # ---------------------------------------------------------------------------
@@ -532,7 +559,10 @@ def player_question_payload(room: Room, q: dict) -> dict:
     total = len(room.quiz["questions"])
     p = {"type": "question", "index": room.q_index + 1, "total": total,
          "qtype": q["type"], "text": q["text"], "time": int(q.get("time", 20)),
-         "image": q.get("image", ""), "powerups": room.powerups}
+         # Defensa en profundidad: aunque _parse_quiz() ya sanea el campo al
+         # guardar, quizzes legacy en la BD o un POST a la API v1 que evite el
+         # parser podrían llevar URLs externas. clean_image() las descarta.
+         "image": clean_image(q.get("image", "")), "powerups": room.powerups}
     if q["type"] in ("choice", "multi"):
         p["options"] = q["options"]
     elif q["type"] == "truefalse":
@@ -795,6 +825,34 @@ app = FastAPI(title="Quizly", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 
+# CSP estricta: el contenido que el usuario (un profesor autenticado) puede
+# inyectar son imágenes de pregunta y avatares. Por defecto solo permitimos
+# recursos del propio origen + data: para avatares raster. Si en el futuro
+# se quieren imágenes remotas, se meterán vía /upload/quiz-image y se
+# servirán desde /static, sin necesidad de relajar img-src.
+_CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data:; "
+    "style-src 'self' 'unsafe-inline'; "   # unsafe-inline por los style="" inline que usan los templates
+    "script-src 'self'; "
+    "connect-src 'self'; "                  # los WebSockets son same-origin (wss://location.host)
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    # Solo emitimos CSP en respuestas HTML; en /static/* y JSON no aporta y
+    # puede romper assets servidos por Starlette con su propio Content-Type.
+    ctype = response.headers.get("content-type", "")
+    if ctype.startswith("text/html"):
+        response.headers.setdefault("Content-Security-Policy", _CSP)
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
 async def landing(request: Request, quizly_session: Optional[str] = Cookie(default=None)):
     user = read_session(quizly_session)
@@ -918,6 +976,12 @@ def _parse_quiz(data):
     # render (parsea todos los quizzes) y los WS de sala.
     if len(questions) > MAX_QUESTIONS:
         questions = []
+    # Saneamiento del campo "image" de cada pregunta: evita que un profesor
+    # almacene una URL externa o un data: malicioso que se sirva luego a
+    # todos los alumnos en el img.src de la pregunta (tracking / XSS).
+    for q in questions:
+        if isinstance(q, dict):
+            q["image"] = clean_image(q.get("image", ""))
     return (data.get("title", "").strip(), data.get("theme", "General").strip() or "General",
             data.get("kind", "mixto"), data.get("folder", "General").strip() or "General",
             questions)

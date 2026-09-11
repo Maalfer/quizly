@@ -263,6 +263,14 @@ def client_ip(request: Request) -> str:
             or (request.client.host if request.client else "?"))
 
 
+def client_ip_from_ws(ws: WebSocket) -> str:
+    """Equivalente a client_ip() para WebSockets: CF-Connecting-IP > X-Real-IP
+    > ws.client.host. Misma política anti-spoofing."""
+    return (ws.headers.get("cf-connecting-ip", "").strip()
+            or ws.headers.get("x-real-ip", "").strip()
+            or (ws.client.host if ws.client else "?"))
+
+
 _HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*"
                       r"(:\d{1,5})?$", re.IGNORECASE)
 
@@ -405,6 +413,7 @@ ROOMS: Dict[str, Room] = {}
 
 MAX_SALAS_POR_USER = 5
 MAX_QUESTIONS = 500
+MAX_PLAYERS = 50
 
 
 def num_salas_activas(owner: str) -> int:
@@ -1396,10 +1405,11 @@ async def host_page(request: Request, code: str, quizly_session: Optional[str] =
 @app.get("/join", response_class=HTMLResponse)
 @app.get("/join/{code}", response_class=HTMLResponse)
 async def join_page(request: Request, code: str = ""):
-    room = ROOMS.get(code)
-    valid = room is not None and room.state == "lobby"
+    if not rate_ok("join:" + client_ip(request), 20, 60):
+        return PlainTextResponse("Demasiadas peticiones. Inténtalo de nuevo en un minuto.",
+                                 status_code=429)
     return templates.TemplateResponse("join.html", {"request": request, "code": code,
-                                                    "valid": valid, "avatars": AVATARS})
+                                                    "avatars": AVATARS})
 
 
 @app.get("/play/{code}", response_class=HTMLResponse)
@@ -2033,9 +2043,14 @@ async def ws_play(ws: WebSocket, code: str):
         await ws.send_json({"type": "error", "msg": "Origen no permitido"})
         await ws.close()
         return
+    if not rate_ok("wsp:" + client_ip_from_ws(ws), 30, 60):
+        await ws.send_json({"type": "error", "msg": "Demasiadas peticiones."})
+        await ws.close()
+        return
     room = ROOMS.get(code)
-    if not room:
-        await ws.send_json({"type": "error", "msg": "Sala no encontrada"})
+    if not room or room.state != "lobby":
+        # Mensaje único: no filtra si la sala existe pero ya empezó frente a inexistente.
+        await ws.send_json({"type": "error", "msg": "No se puede unir a esta sala."})
         await ws.close()
         return
     try:
@@ -2063,6 +2078,10 @@ async def ws_play(ws: WebSocket, code: str):
     if player is None:
         if room.state != "lobby":
             await ws.send_json({"type": "error", "msg": "La partida ya ha empezado"})
+            await ws.close()
+            return
+        if len(room.players) >= MAX_PLAYERS:
+            await ws.send_json({"type": "error", "msg": "La sala está completa."})
             await ws.close()
             return
         existing = {p.name for p in room.players.values()}

@@ -83,7 +83,7 @@ function enter(){
 }
 function err(id,m){document.getElementById(id).innerHTML='<div class="err">'+m+'</div>';}
 
-{% if code and valid %}
+{% if code %}
 window.addEventListener('DOMContentLoaded',checkCode);
 {% endif %}
 </script>

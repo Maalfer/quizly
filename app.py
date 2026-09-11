@@ -853,6 +853,27 @@ async def _security_headers(request: Request, call_next):
     return response
 
 
+# CVE-2025-62727 (Starlette >=0.39.0,<0.49.1): el parser de Range en
+# FileResponse es O(n²) con la longitud de la cabecera. Un GET no autenticado
+# a /static/* con "Range: bytes=0000…a-" de N dígitos bloquea el event loop
+# N²/4 segundos (≈16s con N=80000). uvicorn arranca con --workers 1 en el
+# Dockerfile, así que una sola petición tira el servicio entero.
+# Workaround defensivo en profundidad: rechazamos cualquier Range con más de
+# _RANGE_MAX_DIGITS dígitos antes de que llegue a Starlette. Los rangos
+# legítimos sobre assets de esta app (logo 120px, avatares, etc.) no superan
+# los 7 dígitos; 32 deja margen de sobra para valores atípicos sin permitir
+# el ataque.
+_RANGE_MAX_DIGITS = 32
+
+
+@app.middleware("http")
+async def _reject_oversized_range(request: Request, call_next):
+    http_range = request.headers.get("range", "")
+    if http_range and sum(c.isdigit() for c in http_range) > _RANGE_MAX_DIGITS:
+        return PlainTextResponse("Range header demasiado largo.", 400)
+    return await call_next(request)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def landing(request: Request, quizly_session: Optional[str] = Cookie(default=None)):
     user = read_session(quizly_session)

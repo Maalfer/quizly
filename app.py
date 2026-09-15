@@ -446,6 +446,27 @@ MAX_PLAYERS = 50
 # razonable y queda muy por debajo del Image.MAX_IMAGE_PIXELS por defecto
 # (~89 M) que Pillow dispara cuando ya ha reservado memoria para los píxeles.
 MAX_AVATAR_PIXELS = 25_000_000
+# Tope de tamaño del cuerpo JSON en endpoints de escritura de quiz
+# (CWE-400/770: defensa contra DoS por payload enorme + almacenamiento
+# de quizzes sobredimensionados que degradan /admin y /host/{code}).
+MAX_BODY = 2 * 1024 * 1024
+# Tope de tamaño del JSON serializado de un quiz entero. Defensa contra
+# quizzes legítimos por bytes (bajo MAX_BODY) pero con campos absurdamente
+# largos que se quedan persistidos en BD y se re-parsean en cada visita
+# admin/host (json.loads(q["questions"]) en cada GET).
+MAX_QUIZ_BYTES = 512 * 1024
+# Topes de longitud por campo (defensa contra DoS de almacenamiento
+# persistente: 500 preguntas x campos largos = cuestionarios almacenados
+# de decenas de MB que penalizan cada visita de /admin y /host/{code}).
+MAX_TITLE = 200
+MAX_THEME = 100
+MAX_FOLDER = 100
+MAX_KIND = 50
+MAX_Q_TEXT = 500
+MAX_Q_OPTION = 100
+MAX_Q_OPTIONS = 8
+MAX_Q_ITEMS = 8
+MAX_Q_ANSWER = 200
 
 
 def num_salas_activas(owner: str) -> int:
@@ -994,7 +1015,34 @@ async def admin_page(request: Request, quizly_session: Optional[str] = Cookie(de
 
 
 # ---- CRUD quizzes ----------------------------------------------------------
+async def _read_json_body(request: Request, max_bytes: int = MAX_BODY) -> Optional[dict]:
+    """Lee el cuerpo JSON con tope duro de bytes (defensa contra DoS por
+    payload enorme, CWE-400/770). Devuelve el dict parseado o None si
+    excede el tope o el cuerpo no es JSON válido. Centraliza el patrón de
+    streaming acotado que import_quiz introdujo."""
+    chunks = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > max_bytes:
+            return None
+        chunks.append(chunk)
+    try:
+        data = json.loads(b"".join(chunks))
+    except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _parse_quiz(data):
+    if not isinstance(data, dict):
+        return ("", "General", "mixto", "General", [])
+    # Topes por campo (defensa contra quizzes sobredimensionados que se
+    # quedan persistidos en BD y degradan /admin y /host/{code}).
+    title = (data.get("title") or "")[:MAX_TITLE].strip()
+    theme = ((data.get("theme") or "General")[:MAX_THEME]).strip() or "General"
+    kind = ((data.get("kind") or "mixto")[:MAX_KIND]).strip() or "mixto"
+    folder = ((data.get("folder") or "General")[:MAX_FOLDER]).strip() or "General"
     questions = data.get("questions", [])
     if not isinstance(questions, list):
         questions = []
@@ -1002,15 +1050,44 @@ def _parse_quiz(data):
     # render (parsea todos los quizzes) y los WS de sala.
     if len(questions) > MAX_QUESTIONS:
         questions = []
-    # Saneamiento del campo "image" de cada pregunta: evita que un profesor
-    # almacene una URL externa o un data: malicioso que se sirva luego a
-    # todos los alumnos en el img.src de la pregunta (tracking / XSS).
     for q in questions:
-        if isinstance(q, dict):
-            q["image"] = clean_image(q.get("image", ""))
-    return (data.get("title", "").strip(), data.get("theme", "General").strip() or "General",
-            data.get("kind", "mixto"), data.get("folder", "General").strip() or "General",
-            questions)
+        if not isinstance(q, dict):
+            continue
+        # Topes por campo de pregunta.
+        if isinstance(q.get("text"), str):
+            q["text"] = q["text"][:MAX_Q_TEXT]
+        elif "text" in q:
+            q["text"] = ""
+        if isinstance(q.get("answer"), str):
+            q["answer"] = q["answer"][:MAX_Q_ANSWER]
+        opts = q.get("options")
+        if isinstance(opts, list):
+            q["options"] = [
+                ((o if isinstance(o, str) else str(o))[:MAX_Q_OPTION])
+                for o in opts[:MAX_Q_OPTIONS]
+            ]
+        items = q.get("items")
+        if isinstance(items, list):
+            q["items"] = [
+                ((it if isinstance(it, str) else str(it))[:MAX_Q_OPTION])
+                for it in items[:MAX_Q_ITEMS]
+            ]
+        accepted = q.get("accepted")
+        if isinstance(accepted, list):
+            q["accepted"] = [
+                ((a if isinstance(a, str) else str(a))[:MAX_Q_ANSWER])
+                for a in accepted[:MAX_Q_OPTIONS]
+            ]
+        # Saneamiento del campo "image" de cada pregunta: evita que un profesor
+        # almacene una URL externa o un data: malicioso que se sirva luego a
+        # todos los alumnos en el img.src de la pregunta (tracking / XSS).
+        q["image"] = clean_image(q.get("image", ""))
+    # Defensa final: tamaño total del quiz serializado. Aunque cada campo
+    # esté acotado, N preguntas x campos al tope aún podrían sumar varios MB
+    # que se re-parsean en cada visita de /admin.
+    if len(json.dumps(questions, ensure_ascii=False).encode("utf-8")) > MAX_QUIZ_BYTES:
+        return ("", "General", "mixto", "General", [])
+    return (title, theme, kind, folder, questions)
 
 
 @app.post("/admin/quiz/new")
@@ -1018,7 +1095,10 @@ async def create_quiz(request: Request, quizly_session: Optional[str] = Cookie(d
     user = read_session(quizly_session)
     if not user:
         return JSONResponse({"ok": False}, status_code=401)
-    title, theme, kind, folder, questions = _parse_quiz(await request.json())
+    data = await _read_json_body(request)
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Cuerpo inválido o demasiado grande."}, status_code=413)
+    title, theme, kind, folder, questions = _parse_quiz(data)
     if not title or not questions:
         return JSONResponse({"ok": False, "error": "Faltan datos"}, status_code=400)
     conn = db()
@@ -1037,7 +1117,10 @@ async def update_quiz(quiz_id: int, request: Request, quizly_session: Optional[s
         return JSONResponse({"ok": False}, status_code=401)
     u = get_user(user)
     role = u["role"] if u else "teacher"
-    title, theme, kind, folder, questions = _parse_quiz(await request.json())
+    data = await _read_json_body(request)
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Cuerpo inválido o demasiado grande."}, status_code=413)
+    title, theme, kind, folder, questions = _parse_quiz(data)
     if not title or not questions:
         return JSONResponse({"ok": False, "error": "Faltan datos"}, status_code=400)
     conn = db()
@@ -1127,29 +1210,31 @@ async def import_quiz(request: Request, quizly_session: Optional[str] = Cookie(d
     if not user:
         return JSONResponse({"ok": False}, status_code=401)
     # Lee el body acotado por streaming (evita DoS por payload enorme).
-    MAX_BODY = 2 * 1024 * 1024
-    chunks = []
-    size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > MAX_BODY:
-            return JSONResponse({"ok": False, "error": "El archivo es demasiado grande."}, status_code=413)
-        chunks.append(chunk)
-    body = b"".join(chunks)
-    data = json.loads(body)
+    data = await _read_json_body(request)
+    if data is None:
+        return JSONResponse({"ok": False, "error": "El archivo es demasiado grande o no es JSON válido."}, status_code=413)
     payload = data.get("payload")
     if isinstance(payload, str):
-        payload = json.loads(payload)
+        try:
+            payload = json.loads(payload)
+        except (json.JSONDecodeError, ValueError):
+            payload = {}
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "Sin preguntas"}, status_code=400)
     title = payload.get("title", "Importado").strip() or "Importado"
     questions = payload.get("questions", [])
     if not isinstance(questions, list) or not questions:
         return JSONResponse({"ok": False, "error": "Sin preguntas"}, status_code=400)
     if len(questions) > MAX_QUESTIONS:
         return JSONResponse({"ok": False, "error": f"Máximo {MAX_QUESTIONS} preguntas."}, status_code=400)
+    # Reusa el saneador común: topes por campo y por tamaño total serializado.
+    _, theme, kind, folder, questions = _parse_quiz(payload)
+    if not questions:
+        return JSONResponse({"ok": False, "error": f"Quiz demasiado grande (máx {MAX_QUIZ_BYTES // 1024} KB)."}, status_code=413)
     conn = db()
     conn.execute("INSERT INTO quizzes (title, theme, kind, questions, owner, folder) VALUES (?,?,?,?,?,?)",
-                 (title, payload.get("theme", "General"), payload.get("kind", "mixto"),
-                  json.dumps(questions, ensure_ascii=False), user, payload.get("folder", "General")))
+                 (title, theme, kind,
+                  json.dumps(questions, ensure_ascii=False), user, folder))
     conn.commit()
     conn.close()
     return JSONResponse({"ok": True})
@@ -1651,7 +1736,10 @@ async def api_create(request: Request):
     a = token_owner(request)
     if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
-    title, theme, kind, folder, questions = _parse_quiz(await request.json())
+    data = await _read_json_body(request)
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Cuerpo inválido o demasiado grande."}, status_code=413)
+    title, theme, kind, folder, questions = _parse_quiz(data)
     if not title or not questions:
         return JSONResponse({"ok": False, "error": "Faltan 'title' o 'questions'."}, status_code=400)
     conn = db()
@@ -1668,7 +1756,10 @@ async def api_update(quiz_id: int, request: Request):
     a = token_owner(request)
     if not a:
         return JSONResponse({"ok": False, "error": "Token inválido."}, status_code=401)
-    title, theme, kind, folder, questions = _parse_quiz(await request.json())
+    data = await _read_json_body(request)
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Cuerpo inválido o demasiado grande."}, status_code=413)
+    title, theme, kind, folder, questions = _parse_quiz(data)
     if not title or not questions:
         return JSONResponse({"ok": False, "error": "Faltan 'title' o 'questions'."}, status_code=400)
     conn = db()

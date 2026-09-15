@@ -364,6 +364,12 @@ class Room:
         self.code = code
         self.owner: Optional[str] = None
         self.players: Dict[str, Player] = {}
+        # Paths /static/uploads/* subidos por jugadores de ESTA sala. Solo
+        # estos se borran en cleanup_uploaded_avatars al terminar la partida
+        # — sin este tracking, cualquier jugador puede hacer que end_game()
+        # borre imágenes de pregunta de otros profesores o avatares de
+        # otros jugadores simplemente declarando esos paths como avatar.
+        self.uploaded_files: set = set()
         self.host_ws: Optional[WebSocket] = None
         self.state = "lobby"
         self.quiz: Optional[dict] = None
@@ -800,15 +806,22 @@ def cleanup_uploaded_avatars(room: Room):
     jugadores de la sala al terminar la partida: ya no se usan en ningún
     quiz/sala activa, y save_result() no dejó ninguna referencia a ellas en
     el histórico, así que no hay razón para conservarlas en /static/uploads
-    de forma indefinida."""
-    for p in room.players.values():
-        if p.avatar and _AVATAR_UPLOAD_RE.match(p.avatar):
-            fname = p.avatar.rsplit("/", 1)[-1]
-            path = os.path.join(UPLOAD_DIR, fname)
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+    de forma indefinida.
+
+    Solo se borran los paths registrados en room.uploaded_files (los que
+    jugadores de ESTA sala subieron realmente). Iterar sobre p.avatar de
+    todos los jugadores permite IDOR: un atacante mete como avatar la
+    ruta /static/uploads/<hex>.png de una imagen de pregunta de otro
+    profesor y, al terminar la partida (incluso una ajena en la que el
+    atacante solo se ha unido como jugador), end_game() borra ese fichero
+    del disco de forma permanente y sin papelera."""
+    for avatar_path in room.uploaded_files:
+        fname = avatar_path.rsplit("/", 1)[-1]
+        path = os.path.join(UPLOAD_DIR, fname)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 async def end_game(room: Room):
@@ -2322,6 +2335,11 @@ async def ws_play(ws: WebSocket, code: str):
         pid = secrets.token_hex(8)
         player = Player(pid, name, avatar, team)
         room.players[pid] = player
+        # Tracking: si este jugador subió su propio avatar, lo registramos
+        # como fichero subido POR ESTA SALA — es lo único que cleanup_…
+        # debe poder borrar al terminar.
+        if _AVATAR_UPLOAD_RE.match(avatar):
+            room.uploaded_files.add(avatar)
     player.ws = ws
 
     await ws.send_json({"type": "joined", "pid": player.pid, "token": player.token, "name": player.name,

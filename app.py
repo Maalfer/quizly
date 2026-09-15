@@ -441,6 +441,11 @@ ROOMS: Dict[str, Room] = {}
 MAX_SALAS_POR_USER = 5
 MAX_QUESTIONS = 500
 MAX_PLAYERS = 50
+# Tope de píxeles declarados para un avatar (CWE-400/409: pixel bomb).
+# 25 megapixels (~5000x5000) deja margen de sobra para cualquier avatar
+# razonable y queda muy por debajo del Image.MAX_IMAGE_PIXELS por defecto
+# (~89 M) que Pillow dispara cuando ya ha reservado memoria para los píxeles.
+MAX_AVATAR_PIXELS = 25_000_000
 
 
 def num_salas_activas(owner: str) -> int:
@@ -1238,24 +1243,37 @@ def _sanitize_image(raw: bytes, ext: str) -> Optional[bytes]:
     Decodificar+recodificar además descarta cualquier chunk no estándar que se
     hubiera colado (políglotas, datos anexados) salvo la imagen en sí.
 
-    Devuelve bytes re-encodificados o None si el contenido no es decodificable.
+    Devuelve bytes re-encodificados o None si el contenido no es decodificable
+    o si la imagen declara dimensiones absurdas (defensa contra pixel bomb /
+    CWE-400/409).
     """
     try:
         img = Image.open(io.BytesIO(raw))
-        img = ImageOps.exif_transpose(img)  # normaliza rotación sin dejar EXIF
-        buf = io.BytesIO()
-        save_opts = {"format": "JPEG" if ext == "jpg" else ext.upper()}
-        if ext in ("jpg", "webp"):
-            save_opts["quality"] = 88
-        if ext == "gif":
-            save_opts["save_all"] = True
-        img.save(buf, **save_opts)
-        out = buf.getvalue()
+        try:
+            w, h = img.size
+        except Image.DecompressionBombError:
+            return None
+        if w * h > MAX_AVATAR_PIXELS:
+            return None
+        old_limit = Image.MAX_IMAGE_PIXELS
+        Image.MAX_IMAGE_PIXELS = MAX_AVATAR_PIXELS
+        try:
+            img = ImageOps.exif_transpose(img)  # normaliza rotación sin dejar EXIF
+            buf = io.BytesIO()
+            save_opts = {"format": "JPEG" if ext == "jpg" else ext.upper()}
+            if ext in ("jpg", "webp"):
+                save_opts["quality"] = 88
+            if ext == "gif":
+                save_opts["save_all"] = True
+            img.save(buf, **save_opts)
+            out = buf.getvalue()
+        finally:
+            Image.MAX_IMAGE_PIXELS = old_limit
         img.close()
         if not out or len(out) == 0:
             return None
         return out
-    except (UnidentifiedImageError, OSError, ValueError):
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
         return None
 
 

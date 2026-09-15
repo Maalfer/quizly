@@ -446,6 +446,12 @@ MAX_PLAYERS = 50
 # razonable y queda muy por debajo del Image.MAX_IMAGE_PIXELS por defecto
 # (~89 M) que Pillow dispara cuando ya ha reservado memoria para los píxeles.
 MAX_AVATAR_PIXELS = 25_000_000
+# Tope de longitud del valor de una respuesta de jugador (CWE-400/770/1173:
+# defensa contra CPU-DoS vía normalize() sobre value sin acotar). 200 chars
+# cubre cualquier fill legítimo con margen; el ws_max_size de Uvicorn por
+# defecto (16 MiB) permitía hasta ahora saturar el event loop con dos bucles
+# Python puros por carácter.
+MAX_ANSWER_LEN = 200
 # Tope de tamaño del cuerpo JSON en endpoints de escritura de quiz
 # (CWE-400/770: defensa contra DoS por payload enorme + almacenamiento
 # de quizzes sobredimensionados que degradan /admin y /host/{code}).
@@ -517,11 +523,31 @@ SPEED_BONUS = 500
 BASE_POINTS = 500
 
 
+# Tabla de traducción precompilada para flatten de acentos (C-level, ~10x más
+# rápido que el bucle Python original). str.translate aplica el mapeo en una
+# sola pasada sin construir una lista intermedia.
+_NORM_ACCENT = str.maketrans({
+    "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "ü": "u", "ñ": "n",
+    "à": "a", "è": "e", "ì": "i", "ò": "o", "ù": "u",
+})
+# Regex precompilado para quedarse solo con [a-z0-9] (lo que queda tras
+# .lower() y .translate()).
+_NORM_ALNUM_RE = re.compile(r"[^a-z0-9]")
+
+
 def normalize(s: str) -> str:
+    """Sanea y normaliza una respuesta de fill: minúsculas, sin tildes, solo
+    alfanuméricos. Implementación con str.translate (C-level, ~10x más rápido
+    que un bucle Python por carácter) y regex precompilado. NO usar sobre
+    entradas sin acotar: la defensa contra payloads enormes está en
+    submit_answer() (cap MAX_ANSWER_LEN antes de llegar aquí)."""
+    if s is None:
+        return ""
     s = str(s).strip().lower()
-    repl = {"á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "ü": "u", "ñ": "n"}
-    s = "".join(repl.get(ch, ch) for ch in s)
-    return "".join(ch for ch in s if ch.isalnum())
+    # Aplana tildes/ñ a ASCII en un solo paso C-level.
+    s = s.translate(_NORM_ACCENT)
+    # Filtra no-alfanuméricos.
+    return _NORM_ALNUM_RE.sub("", s)
 
 
 def grade(q: dict, answer) -> float:
@@ -690,6 +716,12 @@ async def submit_answer(room: Room, player: Player, answer):
     q = room.current_question
     if q is None:
         return
+    # Defensa contra CPU-DoS en normalize() (sink O(N) sobre la cadena del
+    # jugador). Un fill legítimo rara vez supera 50 chars; 200 es generoso.
+    # Si llega algo más grande, se acorta antes de tocar grade() — el coste
+    # CPU pasa a O(1) sobre el cap.
+    if isinstance(answer, str) and len(answer) > MAX_ANSWER_LEN:
+        answer = answer[:MAX_ANSWER_LEN]
     player.answered = True
     frac = grade(q, answer)
     st = room.stats[room.q_index]

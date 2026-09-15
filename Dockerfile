@@ -16,5 +16,8 @@ COPY . .
 # Las salas se sirven por WebSocket en este puerto
 EXPOSE 9091
 
-# La app crea las tablas y el admin por defecto al arrancar (lifespan -> init_db)
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9091", "--workers", "1"]
+# La app crea las tablas y el admin por defecto al arrancar (lifespan -> init_db).
+# --ws-max-size 65536 (64 KiB) cierra el vector CPU-DoS en normalize() y
+# cualquier otro sink futuro que reciba strings por WS: un answer legítimo
+# de fill cabe en <1 KiB. El default de Uvicorn es 16 MiB.
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9091", "--workers", "1", "--ws-max-size", "65536"]

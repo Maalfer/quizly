@@ -190,6 +190,13 @@ def init_db():
     _add_col(c, "results", "owner", "VARCHAR(190)")
     _add_col(c, "users", "session_epoch", "INT NOT NULL DEFAULT 0")
     _add_col(c, "api_tokens", "id", "INT AUTO_INCREMENT UNIQUE")
+    # Backfill idempotente: las quizzes y resultados creados antes de que
+    # estas tablas tuvieran columna owner quedaron con NULL. Asignamos
+    # 'admin' para que owns_quiz()/owns_result() fail-closed (vía la
+    # migración de semántica que cierra el BOLA sobre filas legacy) no
+    # haga desaparecer las filas heredadas del banco del admin.
+    c.execute("UPDATE quizzes SET owner='admin' WHERE owner IS NULL OR owner=''")
+    c.execute("UPDATE results SET owner='admin' WHERE owner IS NULL OR owner=''")
     # Solo crea el admin por defecto si NO existe ningún administrador
     # (así, tras renombrar/cambiar el admin, un reinicio no recrea 'admin').
     if not c.execute("SELECT id FROM users WHERE role='admin'").fetchone():
@@ -1043,15 +1050,20 @@ def visible_quizzes(user: str, role: str):
     if role == "admin":
         rows = conn.execute("SELECT * FROM quizzes ORDER BY folder, id").fetchall()
     else:
-        rows = conn.execute("SELECT * FROM quizzes WHERE owner=? OR owner IS NULL ORDER BY folder, id",
+        rows = conn.execute("SELECT * FROM quizzes WHERE owner=? ORDER BY folder, id",
                             (user,)).fetchall()
     conn.close()
     return rows
 
 
 def owns_quiz(user: str, role: str, owner: Optional[str]) -> bool:
-    """Autorización a nivel de objeto: mismo criterio que visible_quizzes()."""
-    return role == "admin" or owner == user or owner is None
+    """Autorización a nivel de objeto: fail-closed como owns_room() y
+    owns_result(). Una quiz sin owner (legacy) no es un 'banco compartido':
+    tras el backfill en init_db esas filas quedan con owner='admin' y
+    solo son visibles/editables para el administrador. Cualquier teacher
+    que intente update/delete/export/load de una quiz ajena (incl. una
+    legacy antes de aplicar el backfill) recibe 403."""
+    return role == "admin" or owner == user
 
 
 def owns_room(user: str, role: str, room: "Room") -> bool:

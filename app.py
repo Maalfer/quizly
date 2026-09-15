@@ -294,6 +294,15 @@ def clean_name(name: str) -> str:
 
 _AVATAR_UPLOAD_RE = re.compile(r"^/static/uploads/[0-9a-f]{20}\.(png|jpg|webp|gif)$")
 
+# Mapa URL -> IP que subió el fichero en /upload/avatar. Sirve para que
+# cleanup_uploaded_avatars solo borre ficheros cuya IP de subida coincide
+# con alguna de las IPs que jugaron en la sala actual. Sin esta liga, un
+# atacante puede declarar como avatar la ruta de una imagen de pregunta
+# de otro profesor y, al terminar una sala propia, hacer que el cleanup
+# la borre del disco (el simple check de room.uploaded_files — "esta sala
+# lo registró" — no basta porque el atacante controla lo que registra).
+_UPLOAD_OWNER: Dict[str, str] = {}
+
 
 def clean_avatar(avatar) -> str:
     """Solo se acepta un emoji de AVATARS o una ruta propia generada por
@@ -370,6 +379,11 @@ class Room:
         # borre imágenes de pregunta de otros profesores o avatares de
         # otros jugadores simplemente declarando esos paths como avatar.
         self.uploaded_files: set = set()
+        # IPs de los jugadores que se han unido a esta sala. Combinado con
+        # _UPLOAD_OWNER, permite que cleanup_uploaded_avatars solo borre
+        # ficheros cuya IP de subida esté entre las IPs que jugaron aquí
+        # (defensa contra IDOR cross-player).
+        self.player_ips: set = set()
         self.host_ws: Optional[WebSocket] = None
         self.state = "lobby"
         self.quiz: Optional[dict] = None
@@ -808,14 +822,26 @@ def cleanup_uploaded_avatars(room: Room):
     el histórico, así que no hay razón para conservarlas en /static/uploads
     de forma indefinida.
 
-    Solo se borran los paths registrados en room.uploaded_files (los que
-    jugadores de ESTA sala subieron realmente). Iterar sobre p.avatar de
-    todos los jugadores permite IDOR: un atacante mete como avatar la
-    ruta /static/uploads/<hex>.png de una imagen de pregunta de otro
-    profesor y, al terminar la partida (incluso una ajena en la que el
-    atacante solo se ha unido como jugador), end_game() borra ese fichero
-    del disco de forma permanente y sin papelera."""
+    Defensa contra IDOR cross-player (CWE-639/284/73): un atacante puede
+    declarar como avatar la ruta /static/uploads/<hex>.<ext> de una imagen
+    de pregunta de otro profesor (la aprende en una sola partida vía
+    player_question_payload → q.image) y, al terminar una sala en la que
+    figure como jugador, conseguir que end_game() borre ese fichero del
+    disco de forma permanente.
+
+    Solo se borra un path si se cumplen LAS DOS condiciones:
+      1. Aparece en _UPLOAD_OWNER (es decir, fue subido vía /upload/avatar
+         alguna vez — descarta paths inventados / no existentes).
+      2. La IP que lo subió está en room.player_ips (algún jugador de
+         ESTA sala subió ese fichero). Esto cierra el bypass del fix
+         anterior (eabeb71), que solo iteraba sobre room.uploaded_files
+         y dejaba al atacante inyectar paths arbitrarios en su propia sala
+         para que el cleanup los borrase.
+    """
     for avatar_path in room.uploaded_files:
+        owner_ip = _UPLOAD_OWNER.get(avatar_path)
+        if not owner_ip or owner_ip not in room.player_ips:
+            continue
         fname = avatar_path.rsplit("/", 1)[-1]
         path = os.path.join(UPLOAD_DIR, fname)
         try:
@@ -1428,9 +1454,14 @@ async def upload_avatar(request: Request, file: UploadFile = File(...)):
     if not cleaned:
         return JSONResponse({"ok": False, "error": "El contenido no es una imagen válida."}, status_code=400)
     name = secrets.token_hex(10) + "." + ext
+    url = "/static/uploads/" + name
     with open(os.path.join(UPLOAD_DIR, name), "wb") as f:
         f.write(cleaned)
-    return JSONResponse({"ok": True, "url": "/static/uploads/" + name})
+    # Liga URL -> IP de subida. cleanup_uploaded_avatars usa esto para
+    # distinguir ficheros subidos legítimamente de paths arbitrarios
+    # declarados como avatar por un atacante.
+    _UPLOAD_OWNER[url] = client_ip(request)
+    return JSONResponse({"ok": True, "url": url})
 
 
 # ---- Cuenta / profesores ---------------------------------------------------
@@ -2300,6 +2331,12 @@ async def ws_play(ws: WebSocket, code: str):
     if first.get("action") != "join":
         await ws.close()
         return
+
+    # Registra la IP del jugador al unirse (la del upgrade de WebSocket,
+    # misma política anti-spoofing que rate_ok y auth). Se usa para que
+    # cleanup_uploaded_avatars solo borre ficheros subidos por alguien de
+    # esta misma sala.
+    room.player_ips.add(client_ip_from_ws(ws))
 
     req_pid = first.get("pid")
     req_token = first.get("token")

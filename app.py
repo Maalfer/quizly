@@ -676,13 +676,16 @@ async def start_question(room: Room):
     await room.broadcast_players(pq)
     hq = dict(pq)
     hq["type"] = "host_question"
-    hq["answer"] = correct_repr(q)
+    # OJO: la respuesta correcta (answer/answer_text/correct_order) NO se manda
+    # aquí. Este mensaje llega al host mientras la pregunta está EN CURSO, y
+    # host.html (con el proyector muchas veces delante de toda la clase) no
+    # debe poder mostrarla hasta el reveal real. Antes se incluía igualmente
+    # y renderQuestion() la pintaba en pantalla al instante para order/numeric/
+    # fill -- el profesor veía la respuesta correcta mientras los alumnos
+    # seguían respondiendo. El reveal (host_reveal, más abajo en
+    # reveal_question()) es el único sitio que debe llevar esta información.
     if q["type"] in ("choice", "multi", "truefalse"):
         hq["options"] = q.get("options", ["Verdadero", "Falso"])
-    if q["type"] == "fill":
-        hq["answer_text"] = q.get("answer", "")
-    if q["type"] == "order":
-        hq["correct_order"] = q.get("items", [])
     hq["players_total"] = len(room.players)
     await room.send_host(hq)
 
@@ -756,6 +759,20 @@ async def submit_answer(room: Room, player: Player, answer):
     if q["type"] in ("choice", "truefalse") and answer is not None:
         key = str(answer)
         st["dist"][key] = st["dist"].get(key, 0) + 1
+    elif q["type"] == "multi" and isinstance(answer, list):
+        # A diferencia de choice/truefalse (un índice por respuesta), aquí
+        # `answer` es una lista de índices seleccionados: se cuenta cada
+        # opción marcada por separado, con la misma clave "índice como
+        # string" que ya espera el desglose por opción del panel del
+        # profesor (host.html renderReveal -> dist[i]). Antes de este fix
+        # `dist` nunca se rellenaba para "multi" y el profesor siempre veía
+        # 0 respuestas por opción pese a que sí se habían contado.
+        for a in answer:
+            try:
+                key = str(int(a))
+            except (TypeError, ValueError):
+                continue
+            st["dist"][key] = st["dist"].get(key, 0) + 1
     if frac >= 0.999:
         st["correct"] += 1
 
@@ -938,7 +955,12 @@ _CSP = (
     "default-src 'self'; "
     "img-src 'self' data:; "
     "style-src 'self' 'unsafe-inline'; "   # unsafe-inline por los style="" inline que usan los templates
-    "script-src 'self'; "
+    # unsafe-inline por los onclick="" y los <script> inline que usan las plantillas
+    # (admin/host/play/join/results/account...). Sin esto, script-src 'self' bloquea
+    # TODO el JS de la app en cualquier navegador moderno -- decisión consciente
+    # de restaurar funcionalidad ya; el resto de mitigaciones (saneado de imágenes/
+    # avatares, CSP en el resto de directivas, etc.) siguen intactas.
+    "script-src 'self' 'unsafe-inline'; "
     "connect-src 'self'; "                  # los WebSockets son same-origin (wss://location.host)
     "object-src 'none'; "
     "base-uri 'self'; "
@@ -1447,7 +1469,7 @@ def _sanitize_image(raw: bytes, ext: str) -> Optional[bytes]:
 
 @app.post("/upload/avatar")
 async def upload_avatar(request: Request, file: UploadFile = File(...)):
-    if not rate_ok("up:" + client_ip(request), 15, 60):
+    if not rate_ok("up:" + client_ip(request), 60, 60):
         return JSONResponse({"ok": False, "error": "Demasiadas subidas."}, status_code=429)
     ct = file.content_type or ""
     if not ct.startswith("image/"):
@@ -1681,7 +1703,7 @@ async def host_page(request: Request, code: str, quizly_session: Optional[str] =
 @app.get("/join", response_class=HTMLResponse)
 @app.get("/join/{code}", response_class=HTMLResponse)
 async def join_page(request: Request, code: str = ""):
-    if not rate_ok("join:" + client_ip(request), 20, 60):
+    if not rate_ok("join:" + client_ip(request), 150, 60):
         return PlainTextResponse("Demasiadas peticiones. Inténtalo de nuevo en un minuto.",
                                  status_code=429)
     return templates.TemplateResponse("join.html", {"request": request, "code": code,
@@ -1695,7 +1717,7 @@ async def play_page(request: Request, code: str):
 
 @app.get("/api/room/{code}/exists")
 async def room_exists(code: str, request: Request):
-    if not rate_ok("roomex:" + client_ip(request), 20, 60):
+    if not rate_ok("roomex:" + client_ip(request), 150, 60):
         return JSONResponse({"exists": False, "joinable": False, "error": "Demasiadas peticiones."},
                             status_code=429)
     room = ROOMS.get(code)
@@ -2325,16 +2347,24 @@ async def ws_play(ws: WebSocket, code: str):
         await ws.send_json({"type": "error", "msg": "Origen no permitido"})
         await ws.close()
         return
-    if not rate_ok("wsp:" + client_ip_from_ws(ws), 30, 60):
+    if not rate_ok("wsp:" + client_ip_from_ws(ws), 150, 60):
         await ws.send_json({"type": "error", "msg": "Demasiadas peticiones."})
         await ws.close()
         return
     room = ROOMS.get(code)
-    if not room or room.state != "lobby":
+    if not room:
         # Mensaje único: no filtra si la sala existe pero ya empezó frente a inexistente.
         await ws.send_json({"type": "error", "msg": "No se puede unir a esta sala."})
         await ws.close()
         return
+    # OJO: room.state != "lobby" NO se rechaza aquí arriba. Si se hiciera, un
+    # jugador que reconecta (wifi cortado a media partida, pid+token válidos)
+    # jamás llegaría a la comprobación de pid/token de más abajo -- el cierre
+    # sería incondicional para CUALQUIER conexión mientras la sala no esté en
+    # lobby, dejando muerto el código de reconexión que sigue en esta función.
+    # El corte por "la partida ya ha empezado" solo tiene sentido para una
+    # incorporación nueva (sin pid/token válido), y ya se aplica más abajo,
+    # una vez sabemos si el que conecta es un jugador que ya estaba en la sala.
     try:
         first = await ws.receive_json()
     except Exception:
@@ -2390,12 +2420,32 @@ async def ws_play(ws: WebSocket, code: str):
         if _AVATAR_UPLOAD_RE.match(avatar):
             room.uploaded_files.add(avatar)
     player.ws = ws
+    # `pid` solo se asignaba en la rama de jugador nuevo (arriba). Un jugador
+    # que RECONECTA (mismo pid+token, tras un corte de wifi) entraba aquí sin
+    # que `pid` quedara nunca ligado -> en cuanto reconectado enviaba
+    # {"action":"answer"} el acceso a `pid` más abajo lanzaba
+    # UnboundLocalError, el except Exception genérico lo silenciaba y la
+    # respuesta del alumno se perdía sin aviso. Se liga aquí, para ambas ramas,
+    # a partir de player.pid (fuente de verdad única).
+    pid = player.pid
 
     await ws.send_json({"type": "joined", "pid": player.pid, "token": player.token, "name": player.name,
                         "avatar": player.avatar, "team": player.team, "state": room.state})
     async with room.lock:
         await room.send_host(room.lobby_payload())
         await room.broadcast_players(room.lobby_payload())
+        # Resync para quien reconecta a media pregunta (wifi cortado y
+        # recuperado durante una partida real): sin esto, el jugador se queda
+        # mirando la última pantalla que tenía hasta el próximo reveal, sin
+        # poder responder la pregunta ya en curso aunque su conexión vuelva a
+        # tiempo. "time" se ajusta al tiempo restante, no al total, para que
+        # la barra de tiempo del cliente no reinicie desde el máximo.
+        if room.state == "question" and room.current_question is not None:
+            q = room.current_question
+            pq = player_question_payload(room, q)
+            elapsed = time.time() - room.q_started_at
+            pq["time"] = max(1, int(q.get("time", 20)) - int(elapsed))
+            await _safe_send(player, pq)
 
     try:
         while True:

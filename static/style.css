@@ -140,6 +140,7 @@ html.light .theme-toggle{box-shadow:0 6px 18px rgba(100,116,139,.3)}
 .btn.pink,.btn.blue{border-color:var(--cyan);color:var(--cyan);background:rgba(34,211,238,.08)}
 .btn.pink:hover,.btn.blue:hover{background:var(--cyan);color:#04222a;box-shadow:0 0 18px rgba(34,211,238,.45)}
 .btn.ghost{border-color:var(--border);color:var(--txt);background:rgba(148,163,184,.07)}
+.btn.ghost.on{border-color:var(--green);color:var(--green);background:rgba(16,185,129,.14)}
 .btn.ghost:hover{background:var(--panel2);box-shadow:none;color:#fff}
 .btn.big{padding:18px 42px;font-size:1.2rem}
 .btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;transform:none}

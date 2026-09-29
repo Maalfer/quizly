@@ -8,8 +8,8 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <title>Jugar · Quizly</title>
 <link rel="icon" type="image/png" href="/static/logo_120.png">
-<link rel="stylesheet" href="/static/style.css?v=18">
-<script src="/static/quizly.js?v=18" defer></script>
+<link rel="stylesheet" href="/static/style.css?v=19">
+<script src="/static/quizly.js?v=19" defer></script>
 </head>
 <body>
 <div class="wrap" style="min-height:100vh">
@@ -117,6 +117,8 @@ function handle(m){
 }
 
 function renderQuestion(m){
+  // Reenvío por reconexión de la misma pregunta: no redibujar (borraría lo escrito).
+  if(!answered && lastQ && lastQ.index===m.index && lastQ.text===m.text && document.getElementById('fillInput')) return;
   answered=false; orderArr=[]; multiSel=[]; boostArmed=false; curType=m.qtype; lastQ=m; myAnswer=null; show('play');
   document.getElementById('idx').textContent=m.index; document.getElementById('total').textContent=m.total;
   document.getElementById('time').textContent=m.time+'s'; document.getElementById('qText').textContent=m.text;
@@ -137,8 +139,13 @@ function renderQuestion(m){
   } else if(m.qtype==='numeric'){
     area.className='numeric-box';
     const mid=Math.round((Number(m.min)+Number(m.max))/2);
-    area.innerHTML='<div class="numeric-val" id="numVal">'+mid+'</div>'+
-      '<input type="range" id="numRange" min="'+Q.esc(m.min)+'" max="'+Q.esc(m.max)+'" value="'+mid+'" oninput="document.getElementById(\'numVal\').textContent=this.value">'+
+    // Además del slider (rápido para acotar), un campo numérico editable:
+    // con rangos amplios (ej. "¿en qué puerto...?" 1000-9999) arrastrar el
+    // slider para acertar un valor exacto es tremendamente impreciso en
+    // móvil. Ambos quedan sincronizados; el que manda al responder es el
+    // campo numérico.
+    area.innerHTML='<input type="number" class="numeric-val" id="numVal" value="'+mid+'" inputmode="numeric" style="width:160px;text-align:center;margin:0 auto;display:block" oninput="syncNumFromText(this.value)">'+
+      '<input type="range" id="numRange" min="'+Q.esc(m.min)+'" max="'+Q.esc(m.max)+'" value="'+mid+'" oninput="syncNumFromRange(this.value)">'+
       '<div class="row" style="justify-content:space-between"><span class="muted">'+Q.esc(m.min)+'</span><span class="muted">'+Q.esc(m.max)+'</span></div>'+
       '<button class="btn green" style="width:100%;margin-top:14px" onclick="sendNumeric()">Responder</button>';
   } else if(m.qtype==='order'){
@@ -148,7 +155,7 @@ function renderQuestion(m){
     renderOrder();
   } else { // fill
     area.className='';
-    area.innerHTML='<input id="fillInput" placeholder="Escribe tu respuesta" style="margin-top:14px" onkeydown="if(event.key===\'Enter\')sendFill()">'+
+    area.innerHTML='<input id="fillInput" type="text" placeholder="Escribe tu respuesta" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send" style="margin-top:14px" onkeydown="if(event.key===\'Enter\')sendFill()">'+
       '<button class="btn green" style="width:100%;margin-top:12px" onclick="sendFill()">Responder</button>';
   }
   runTimer(m.time); Q.sfx.tick();
@@ -164,7 +171,10 @@ function answerChoice(i){ if(answered)return; Q.sfx.select(); myAnswer=i;
 function toggleMulti(i){ if(answered)return; const btn=document.querySelector('#area .ans[data-i="'+i+'"]'); const k=multiSel.indexOf(i);
   if(k>=0){multiSel.splice(k,1);btn.classList.remove('sel');}else{multiSel.push(i);btn.classList.add('sel');} Q.sfx.select(); }
 function sendMulti(){ if(answered)return; myAnswer=multiSel.slice(); lock(); send({action:'answer',value:multiSel}); }
-function sendNumeric(){ if(answered)return; myAnswer=parseFloat(document.getElementById('numRange').value); lock(); send({action:'answer',value:myAnswer}); }
+function syncNumFromRange(v){ document.getElementById('numVal').value=v; }
+function syncNumFromText(v){ const r=document.getElementById('numRange'); const n=parseFloat(v);
+  if(!isNaN(n) && n>=+r.min && n<=+r.max) r.value=n; }
+function sendNumeric(){ if(answered)return; myAnswer=parseFloat(document.getElementById('numVal').value); if(isNaN(myAnswer))return; lock(); send({action:'answer',value:myAnswer}); }
 function sendFill(){ if(answered)return; const v=document.getElementById('fillInput').value.trim(); if(!v)return; myAnswer=v; lock(); send({action:'answer',value:v}); }
 function sendOrder(){ if(answered)return; myAnswer=orderArr.slice(); lock(); send({action:'answer',value:orderArr}); }
 

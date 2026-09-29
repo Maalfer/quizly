@@ -8,14 +8,16 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <title>Sala {{ code }} · Quizly</title>
 <link rel="icon" type="image/png" href="/static/logo_120.png">
-<link rel="stylesheet" href="/static/style.css?v=18">
-<script src="/static/quizly.js?v=18" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<link rel="stylesheet" href="/static/style.css?v=19">
+<script src="/static/quizly.js?v=19" defer></script>
+<script src="/static/qrcode.min.js?v=1"></script>
 </head>
 <body>
 <div class="topbar wrap">
   <a href="/" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
   <div class="row" style="align-items:center">
+    <audio id="pokeAudio" src="/static/audio-pokemon.mp3" loop preload="none"></audio>
+    <button class="btn ghost" id="pokeBtn" onclick="togglePokeAudio()" title="Reproducir o pausar Audio Pokémon" aria-label="Reproducir o pausar Audio Pokémon">🎵 Audio Pokémon</button>
     <button class="mute-btn" id="muteBtn" onclick="toggleMute()" title="Sonido" aria-label="Activar o silenciar el sonido">🔊</button>
     <a class="btn ghost" href="/admin">← Panel</a>
   </div>
@@ -135,6 +137,11 @@ const TYPE_LABEL={choice:'Test',truefalse:'V/F',multi:'Múltiple',fill:'Rellenar
 function show(id){['lobby','question','reveal','ended'].forEach(s=>document.getElementById(s).style.display=(s===id?'block':'none'));}
 function toggleProjector(){ document.body.classList.toggle('projector'); }
 function toggleMute(){ const m=Q.toggleMute(); document.getElementById('muteBtn').textContent=m?'🔇':'🔊'; }
+function togglePokeAudio(){
+  const a=document.getElementById('pokeAudio'), b=document.getElementById('pokeBtn');
+  if(a.paused){ a.play().catch(()=>{}); b.textContent='⏸ Audio Pokémon'; b.classList.add('on'); }
+  else { a.pause(); b.textContent='🎵 Audio Pokémon'; b.classList.remove('on'); }
+}
 function sendConfig(){ send({action:'config',teams_on:document.getElementById('cfgTeams').checked,
   n_teams:parseInt(document.getElementById('cfgNTeams').value),
   shuffle_q:document.getElementById('cfgShuffleQ').checked,
@@ -176,11 +183,14 @@ function renderQuestion(m){
   if(m.qtype==='choice'||m.qtype==='truefalse'||m.qtype==='multi'){
     opt.className='answers'; opt.innerHTML=m.options.map((o,i)=>'<div class="ans a'+i+'" data-i="'+i+'"><span class="sym">'+syms[i]+'</span>'+Q.esc(o)+'</div>').join('');
   } else if(m.qtype==='order'){
-    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🔢 Orden correcto: <strong>'+(m.correct_order||[]).map(Q.esc).join(' → ')+'</strong></p>';
+    // No se muestra el orden correcto aquí -- eso es lo que están resolviendo
+    // los alumnos ahora mismo. Se revela solo en renderReveal(), cuando
+    // termina la pregunta (igual que ya pasaba en choice/truefalse/multi).
+    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🔢 Los alumnos están ordenando los elementos…</p>';
   } else if(m.qtype==='numeric'){
-    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🎯 Respuesta: <strong>'+Q.esc(String(m.answer))+'</strong></p>';
+    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🎯 Los alumnos están respondiendo…</p>';
   } else {
-    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">✍️ Respuesta: <strong>'+Q.esc(m.answer_text)+'</strong></p>';
+    opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">✍️ Los alumnos están escribiendo su respuesta…</p>';
   }
   runTimer(m.time); Q.sfx.tick();
 }

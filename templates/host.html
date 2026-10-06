@@ -8,8 +8,8 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <title>Sala {{ code }} · Quizly</title>
 <link rel="icon" type="image/png" href="/static/logo_120.png">
-<link rel="stylesheet" href="/static/style.css?v=19">
-<script src="/static/quizly.js?v=19" defer></script>
+<link rel="stylesheet" href="/static/style.css?v=20">
+<script src="/static/quizly.js?v=20" defer></script>
 <script src="/static/qrcode.min.js?v=1"></script>
 </head>
 <body>
@@ -73,6 +73,7 @@
         <span class="muted">⏱ <span id="qTime"></span>s · <span id="answered">0</span>/<span id="answeredTot">0</span></span>
       </div>
       <div class="qbig" id="qText"></div>
+      <pre class="qcode" id="qCode" style="display:none"></pre>
       <img id="qImg" class="qimg" alt="" style="display:none">
       <div class="timerbar"><div id="tbar"></div></div>
       <div id="qOptions"></div>
@@ -87,8 +88,11 @@
     <div class="card" style="text-align:center">
       <h2 id="revealCorrect"></h2>
       <div class="qbig" id="revealQText" style="font-size:1.4rem;margin:6px 0"></div>
+      <pre class="qcode" id="revCode" style="display:none"></pre>
       <div id="distBox"></div>
+      <div class="explain" id="revExplain" style="display:none"></div>
       <p class="muted"><span id="revAnswered"></span> respondieron</p>
+      <div id="whoBox"></div>
       <h3 style="margin-top:18px">🏆 Clasificación</h3>
       <ol class="lb" id="lbReveal"></ol>
       <div id="teamReveal"></div>
@@ -133,7 +137,7 @@ function filterQuiz(){
 filterQuiz();
 
 let hasNext=false;
-const TYPE_LABEL={choice:'Test',truefalse:'V/F',multi:'Múltiple',fill:'Rellenar',numeric:'Numérico',order:'Ordenar'};
+const TYPE_LABEL={choice:'Test',truefalse:'V/F',multi:'Múltiple',fill:'Rellenar',numeric:'Numérico',order:'Ordenar',match:'Emparejar',cloze:'Huecos',classify:'Clasificar'};
 function show(id){['lobby','question','reveal','ended'].forEach(s=>document.getElementById(s).style.display=(s===id?'block':'none'));}
 function toggleProjector(){ document.body.classList.toggle('projector'); }
 function toggleMute(){ const m=Q.toggleMute(); document.getElementById('muteBtn').textContent=m?'🔇':'🔊'; }
@@ -179,14 +183,25 @@ function renderQuestion(m){
   document.getElementById('qTypeTag').textContent=TYPE_LABEL[m.qtype]||m.qtype;
   document.getElementById('answeredTot').textContent=m.players_total; document.getElementById('answered').textContent=0;
   const img=document.getElementById('qImg'); if(m.image){img.src=m.image;img.alt='Imagen de la pregunta';img.style.display='block';}else{img.style.display='none';img.alt='';}
-  const opt=document.getElementById('qOptions'); const syms=['▲','◆','●','■'];
+  const code=document.getElementById('qCode'); if(m.code){code.textContent=m.code;code.style.display='block';}else{code.textContent='';code.style.display='none';}
+  const opt=document.getElementById('qOptions');
   if(m.qtype==='choice'||m.qtype==='truefalse'||m.qtype==='multi'){
-    opt.className='answers'; opt.innerHTML=m.options.map((o,i)=>'<div class="ans a'+i+'" data-i="'+i+'"><span class="sym">'+syms[i]+'</span>'+Q.esc(o)+'</div>').join('');
+    opt.className='answers'; opt.innerHTML=m.options.map((o,i)=>'<div class="ans a'+(i%8)+'" data-i="'+i+'"><span class="sym">'+Q.sym(i)+'</span>'+Q.esc(o)+'</div>').join('');
   } else if(m.qtype==='order'){
     // No se muestra el orden correcto aquí -- eso es lo que están resolviendo
     // los alumnos ahora mismo. Se revela solo en renderReveal(), cuando
     // termina la pregunta (igual que ya pasaba en choice/truefalse/multi).
     opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🔢 Los alumnos están ordenando los elementos…</p>';
+  } else if(m.qtype==='match'){
+    opt.className=''; opt.innerHTML='<div class="hostopts">'+(m.left||[]).map(l=>'<div class="hostopt"><span class="ho-text">'+Q.esc(l)+'</span><span class="muted">→ ?</span></div>').join('')+'</div>'+
+      '<p class="muted" style="text-align:center">🔗 Emparejando…</p>';
+  } else if(m.qtype==='cloze'){
+    opt.className=''; opt.innerHTML='<div class="cloze-text">'+Q.esc(m.text).replace(/____/g,'<span class="dnd-slot"></span>')+'</div>'+
+      '<div class="dnd-bank">'+(m.bank||[]).map(b=>'<span class="chip-d">'+Q.esc(b)+'</span>').join('')+'</div>';
+    document.getElementById('qText').textContent='Completa los huecos';
+  } else if(m.qtype==='classify'){
+    opt.className=''; opt.innerHTML='<div class="dnd-bank">'+(m.items||[]).map(b=>'<span class="chip-d">'+Q.esc(b)+'</span>').join('')+'</div>'+
+      '<div class="cat-grid">'+(m.categories||[]).map(c=>'<div class="cat-col"><h4>'+Q.esc(c)+'</h4></div>').join('')+'</div>';
   } else if(m.qtype==='numeric'){
     opt.className=''; opt.innerHTML='<p class="muted" style="text-align:center;margin-top:10px">🎯 Los alumnos están respondiendo…</p>';
   } else {
@@ -195,7 +210,7 @@ function renderQuestion(m){
   runTimer(m.time); Q.sfx.tick();
 }
 function renderReveal(m){
-  clearInterval(tInt); hasNext=m.has_next; const syms=['▲','◆','●','■'];
+  clearInterval(tInt); hasNext=m.has_next;
   const mm=window._m||{};
   if(['choice','truefalse','multi'].includes(mm.qtype)){
     const corr=Array.isArray(m.correct)?m.correct:[m.correct];
@@ -208,7 +223,7 @@ function renderReveal(m){
     const dist=m.dist||{}; const maxv=Math.max(1,...Object.values(dist).map(Number));
     db.innerHTML='<div class="hostopts">'+(mm.options||[]).map((o,i)=>{
       const c=corr.includes(i), cnt=dist[i]||0;
-      return '<div class="hostopt'+(c?' ok':'')+'"><span class="opt-sym a'+i+'">'+syms[i]+'</span>'+
+      return '<div class="hostopt'+(c?' ok':'')+'"><span class="opt-sym a'+(i%8)+'">'+Q.sym(i)+'</span>'+
         '<span class="ho-text">'+Q.esc(o)+'</span>'+
         '<span class="ho-bar"><span style="width:'+(cnt/maxv*100)+'%"></span></span>'+
         '<span class="ho-cnt">'+cnt+(c?' ✓':'')+'</span></div>';
@@ -220,11 +235,18 @@ function renderReveal(m){
     if(mm.qtype==='choice'||mm.qtype==='truefalse') ct=(mm.options||[])[m.correct]||'';
     else if(mm.qtype==='multi') ct=(m.correct||[]).map(i=>(mm.options||[])[i]).join(', ');
     else if(mm.qtype==='order') ct=(m.correct_order||[]).join(' → ');
+    else if(mm.qtype==='match') ct=(m.correct||[]).map(p=>p[0]+' → '+p[1]).join('  ·  ');
+    else if(mm.qtype==='cloze'){ let k=0; ct=(mm.text||'').replace(/____/g,()=>'['+((m.correct||[])[k++]||'')+']'); }
+    else if(mm.qtype==='classify'){ const cs=(m.correct&&m.correct.categories)||[], its=(m.correct&&m.correct.citems)||[];
+      ct=cs.map((c,i)=>c+': '+its.filter(x=>x.c===i).map(x=>x.t).join(', ')).join('  ·  '); }
     else ct=m.answer_text;
     document.getElementById('revealCorrect').textContent='✅ '+ct;
-    document.getElementById('revealQText').textContent=mm.text||'';
+    document.getElementById('revealQText').textContent=mm.qtype==='cloze'?'':(mm.text||'');
+    const rc=document.getElementById('revCode'); if(mm.code){rc.textContent=mm.code;rc.style.display='block';}else{rc.style.display='none';}
+    const ex=document.getElementById('revExplain'); if(m.explain){ex.textContent='💡 '+m.explain;ex.style.display='block';}else{ex.style.display='none';}
+    document.getElementById('whoBox').innerHTML=whoHtml(m.results);
     document.getElementById('revAnswered').textContent=m.answered+'/'+m.total;
-    renderBoard('lbReveal',m.scoreboard);
+    renderBoard('lbReveal',m.scoreboard,m.results);
     document.getElementById('teamReveal').innerHTML=teamHtml(m.team_board);
     document.getElementById('nextBtn').textContent=hasNext?'Siguiente ▶':'Ver resultados 🏁';
   },1200);
@@ -240,9 +262,16 @@ function renderEnd(m){
 function teamHtml(tb){ if(!tb||!tb.length)return'';
   return '<h3 style="margin-top:20px">Equipos</h3><ol class="lb teamlb">'+tb.map((t,i)=>
     '<li><span class="pos">'+(i+1)+'</span><span class="av2">'+t.emoji+'</span><span class="nm">'+t.team+' <span class="muted">('+t.members+')</span></span><span class="sc">'+t.score+'</span></li>').join('')+'</ol>'; }
-function renderBoard(id,board){ const medals=['🥇','🥈','🥉'];
+const ST_MARK={ok:'✅',partial:'🟡',bad:'❌',none:'➖'};
+const ST_TITLE={ok:'Acertaron',partial:'Acierto parcial',bad:'Fallaron',none:'Sin responder'};
+function whoHtml(results){ if(!results||!results.length)return'';
+  return ['ok','partial','bad','none'].map(st=>{ const g=results.filter(r=>r.status===st); if(!g.length)return'';
+    return '<h4 style="margin:14px 0 6px">'+ST_MARK[st]+' '+ST_TITLE[st]+' ('+g.length+')</h4><div class="whobox">'+
+      g.map(r=>'<span class="who '+st+'">'+Q.avatarHtml(r.avatar,'av2')+' '+Q.esc(r.name)+(r.points?' <span class="pts">+'+r.points+'</span>':'')+'</span>').join('')+'</div>'; }).join(''); }
+function renderBoard(id,board,results){ const medals=['🥇','🥈','🥉'];
+  const st={}; (results||[]).forEach(r=>st[r.name]=r.status);
   document.getElementById(id).innerHTML=board.map((p,i)=>'<li><span class="pos">'+(medals[i]||(i+1))+'</span>'+Q.avatarHtml(p.avatar,'av2')+
-    '<span class="nm">'+Q.esc(p.name)+(p.team?' <span class="team-badge">'+p.team+'</span>':'')+(p.streak>1?' 🔥'+p.streak:'')+'</span><span class="sc">'+p.score+'</span></li>').join(''); }
+    '<span class="nm">'+(st[p.name]?'<span class="mark" title="'+ST_TITLE[st[p.name]]+'">'+ST_MARK[st[p.name]]+'</span>':'')+Q.esc(p.name)+(p.team?' <span class="team-badge">'+p.team+'</span>':'')+(p.streak>1?' 🔥'+p.streak:'')+'</span><span class="sc">'+p.score+'</span></li>').join(''); }
 function runTimer(sec){ const bar=document.getElementById('tbar'); bar.style.transition='none'; bar.style.width='100%';
   requestAnimationFrame(()=>{bar.style.transition='width '+sec+'s linear';bar.style.width='0%';}); clearInterval(tInt); }
 connect();

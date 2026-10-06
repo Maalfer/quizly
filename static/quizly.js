@@ -12,6 +12,11 @@
     ? '<img class="av-img '+cls+'" src="'+Q.esc(a)+'" alt="">'
     : '<span class="av-emoji '+cls+'">'+Q.esc(a||'🦊')+'</span>';
 
+  // --- Símbolos de opción: hasta 8 (MAX_Q_OPTIONS). Antes solo había 4 y la 5ª
+  // opción salía como "undefined" y sin color. Q.sym(i) nunca devuelve undefined. ---
+  Q.SYMS = ['▲','◆','●','■','★','⬟','✚','⬢'];
+  Q.sym = i => Q.SYMS[((i % Q.SYMS.length) + Q.SYMS.length) % Q.SYMS.length];
+
   // --- Sonidos (WebAudio, sin ficheros) ---
   let ctx=null, muted=localStorage.getItem('quizly_muted')==='1';
   function ac(){ if(!ctx){try{ctx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}} return ctx; }

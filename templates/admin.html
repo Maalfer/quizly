@@ -8,8 +8,8 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <title>Panel · Quizly</title>
 <link rel="icon" type="image/png" href="/static/logo_120.png">
-<link rel="stylesheet" href="/static/style.css?v=19">
-<script src="/static/quizly.js?v=19" defer></script>
+<link rel="stylesheet" href="/static/style.css?v=20">
+<script src="/static/quizly.js?v=20" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main">Saltar al contenido</a>
@@ -132,7 +132,7 @@ async function importQuiz(inp){
   }catch(e){ alert('Archivo JSON no válido'); }
 }
 
-const TYPES=[['choice','Test'],['truefalse','V/F'],['multi','Múltiple'],['fill','Rellenar'],['numeric','Numérico'],['order','Ordenar']];
+const TYPES=[['choice','Test'],['truefalse','V/F'],['multi','Múltiple'],['fill','Rellenar'],['numeric','Numérico'],['order','Ordenar'],['match','Emparejar'],['cloze','Huecos arrastrables'],['classify','Clasificar']];
 let questions=[], editingId=null;
 
 function openModal(){ document.getElementById('modal').classList.add('open'); document.body.style.overflow='hidden'; setTimeout(()=>{var e=document.getElementById('qTitle'); if(e)e.focus();},60); }
@@ -147,6 +147,9 @@ function blank(type){
   if(type==='fill')return {type,text:'',image:'',answer:'',time:20};
   if(type==='numeric')return {type,text:'',image:'',answer:0,tol:0,min:0,max:100,time:20};
   if(type==='order')return {type,text:'',image:'',items:['','',''],time:25};
+  if(type==='match')return {type,text:'',image:'',pairs:[['',''],['','']],time:30};
+  if(type==='cloze')return {type,text:'',image:'',blanks:[''],distractors:[],time:30};
+  if(type==='classify')return {type,text:'',image:'',categories:['',''],citems:[{t:'',c:0},{t:'',c:1}],time:35};
 }
 function newQuiz(){
   editingId=null; document.getElementById('qTitle').value=''; document.getElementById('qTheme').value='';
@@ -175,10 +178,15 @@ function normalizeQ(q){
   if(q.type==='numeric'){q.answer=q.answer??0;q.tol=q.tol??0;q.min=q.min??0;q.max=q.max??100;}
   if(q.type==='order'){q.items=q.items||['','',''];}
   if(q.type==='fill'){q.answer=q.answer||'';}
+  if(q.type==='match'){q.pairs=(Array.isArray(q.pairs)?q.pairs:[]).map(p=>[String(p&&p[0]||''),String(p&&p[1]||'')]);while(q.pairs.length<2)q.pairs.push(['','']);}
+  if(q.type==='cloze'){q.text=q.text||'';q.blanks=Array.isArray(q.blanks)?q.blanks.map(String):[''];q.distractors=Array.isArray(q.distractors)?q.distractors.map(String):[];}
+  if(q.type==='classify'){q.categories=Array.isArray(q.categories)?q.categories.map(String):['',''];while(q.categories.length<2)q.categories.push('');
+    q.citems=(Array.isArray(q.citems)?q.citems:[]).map(it=>({t:String(it&&it.t||''),c:parseInt(it&&it.c)||0}));while(q.citems.length<2)q.citems.push({t:'',c:0});}
+  q.code=typeof q.code==='string'?q.code:''; q.explain=typeof q.explain==='string'?q.explain:'';
   return q;
 }
 function addQuestion(){ questions.push(blank('choice')); renderBuilder(); scrollBuilderBottom(); }
-function setType(i,t){ const old=questions[i]; const nq=blank(t); nq.text=old.text; nq.image=old.image; nq.time=old.time; questions[i]=nq; renderBuilder(); }
+function setType(i,t){ const old=questions[i]; const nq=blank(t); nq.text=old.text; nq.image=old.image; nq.time=old.time; nq.code=old.code||''; nq.explain=old.explain||''; questions[i]=nq; renderBuilder(); }
 function scrollBuilderBottom(){ const b=document.getElementById('builder'); b.lastElementChild&&b.lastElementChild.scrollIntoView({behavior:'smooth'}); }
 
 function renderBuilder(){
@@ -190,7 +198,9 @@ function renderBuilder(){
       '<span class="grip muted" title="Arrastra para reordenar">⠿ arrastrar</span>'+
       '<button class="btn ghost btn-sm" onclick="questions.splice('+i+',1);renderBuilder()">🗑 Quitar</button></div>';
     h+='<div class="qtype-row">'+TYPES.map(([t,l])=>'<span class="qt'+(q.type===t?' on':'')+'" onclick="setType('+i+',\''+t+'\')">'+l+'</span>').join('')+'</div>';
-    h+='<div class="field"><span class="field-label">📝 Enunciado</span><textarea rows="2" placeholder="Escribe la pregunta…" oninput="questions['+i+'].text=this.value">'+Q.esc(q.text)+'</textarea></div>';
+    h+='<div class="field"><span class="field-label">📝 Enunciado</span><textarea rows="2" placeholder="Escribe la pregunta…" maxlength="500" oninput="questions['+i+'].text=this.value'+(q.type==='cloze'?';clozeInfo('+i+')':'')+'">'+Q.esc(q.text)+'</textarea></div>';
+    if(q.type==='cloze')h+='<div class="muted" style="margin:-6px 0 10px"><span id="czi'+i+'"></span> <button type="button" class="btn ghost btn-sm" onclick="insertBlank('+i+')">＋ Insertar ____ al final</button></div>';
+    h+='<div class="field"><span class="field-label">💻 Código (opcional, se muestra bajo el enunciado)</span><textarea rows="3" maxlength="1500" spellcheck="false" style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px" placeholder="Fragmento de código…" oninput="questions['+i+'].code=this.value">'+Q.esc(q.code||'')+'</textarea></div>';
     h+='<div class="field"><span class="field-label">🖼 Imagen (URL, opcional)</span><input value="'+Q.esc(q.image)+'" placeholder="https://… (déjalo vacío si no quieres imagen)" oninput="questions['+i+'].image=this.value"></div>';
     if(q.type==='choice'||q.type==='truefalse'){
       const editable=q.type==='choice';
@@ -220,12 +230,58 @@ function renderBuilder(){
         '<input value="'+Q.esc(o)+'" placeholder="Elemento '+(j+1)+'" oninput="questions['+i+'].items['+j+']=this.value">'+
         '<button type="button" class="opt-mark" onclick="questions['+i+'].items.splice('+j+',1);renderBuilder()">✕</button></div>';});
       h+='<button class="btn ghost btn-sm" style="margin-top:6px" onclick="questions['+i+'].items.push(\'\');renderBuilder()">＋ Elemento</button></div>';
+    } else if(q.type==='match'){
+      h+='<div class="field"><span class="field-label">🔗 Pares a emparejar (2 a 8). Se mostrarán mezclados</span>';
+      q.pairs.forEach((p,j)=>{h+='<div class="opt"><span class="ord-n">'+(j+1)+'</span>'+
+        '<input maxlength="100" value="'+Q.esc(p[0])+'" placeholder="Izquierda" oninput="questions['+i+'].pairs['+j+'][0]=this.value">'+
+        '<input maxlength="100" value="'+Q.esc(p[1])+'" placeholder="Derecha" oninput="questions['+i+'].pairs['+j+'][1]=this.value">'+
+        '<button type="button" class="opt-mark" title="Quitar par" onclick="delItem('+i+',\'pairs\','+j+',2)">✕</button></div>';});
+      if(q.pairs.length<8)h+='<button type="button" class="btn ghost btn-sm" style="margin-top:6px" onclick="questions['+i+'].pairs.push([\'\',\'\']);renderBuilder()">＋ Par</button>';
+      h+='</div>';
+    } else if(q.type==='cloze'){
+      h+='<div class="field"><span class="field-label">🧩 Palabras correctas, en orden de aparición de cada ____ (1 a 8)</span>';
+      q.blanks.forEach((o,j)=>{h+='<div class="opt correct"><span class="ord-n">'+(j+1)+'</span>'+
+        '<input maxlength="100" value="'+Q.esc(o)+'" placeholder="Palabra del hueco '+(j+1)+'" oninput="questions['+i+'].blanks['+j+']=this.value">'+
+        '<button type="button" class="opt-mark" title="Quitar hueco" onclick="delItem('+i+',\'blanks\','+j+',1)">✕</button></div>';});
+      if(q.blanks.length<8)h+='<button type="button" class="btn ghost btn-sm" style="margin-top:6px" onclick="questions['+i+'].blanks.push(\'\');renderBuilder()">＋ Hueco</button>';
+      h+='</div><div class="field"><span class="field-label">🎭 Palabras falsas / distractores (opcional, hasta 6)</span>';
+      q.distractors.forEach((o,j)=>{h+='<div class="opt"><span class="ord-n">'+(j+1)+'</span>'+
+        '<input maxlength="100" value="'+Q.esc(o)+'" placeholder="Distractor '+(j+1)+'" oninput="questions['+i+'].distractors['+j+']=this.value">'+
+        '<button type="button" class="opt-mark" title="Quitar" onclick="delItem('+i+',\'distractors\','+j+',0)">✕</button></div>';});
+      if(q.distractors.length<6)h+='<button type="button" class="btn ghost btn-sm" style="margin-top:6px" onclick="questions['+i+'].distractors.push(\'\');renderBuilder()">＋ Distractor</button>';
+      h+='</div>';
+    } else if(q.type==='classify'){
+      h+='<div class="field"><span class="field-label">🗂 Categorías (2 a 4)</span>';
+      q.categories.forEach((o,j)=>{h+='<div class="opt"><span class="opt-sym a'+j+'">'+syms[j]+'</span>'+
+        '<input maxlength="100" value="'+Q.esc(o)+'" placeholder="Categoría '+(j+1)+'" oninput="questions['+i+'].categories['+j+']=this.value;refreshCatSelects('+i+')">'+
+        '<button type="button" class="opt-mark" title="Quitar categoría" onclick="delCategory('+i+','+j+')">✕</button></div>';});
+      if(q.categories.length<4)h+='<button type="button" class="btn ghost btn-sm" style="margin-top:6px" onclick="questions['+i+'].categories.push(\'\');renderBuilder()">＋ Categoría</button>';
+      h+='</div><div class="field"><span class="field-label">📦 Elementos (2 a 10, textos únicos) y su categoría correcta</span>';
+      q.citems.forEach((it,j)=>{h+='<div class="opt"><span class="ord-n">'+(j+1)+'</span>'+
+        '<input maxlength="100" value="'+Q.esc(it.t)+'" placeholder="Elemento '+(j+1)+'" oninput="questions['+i+'].citems['+j+'].t=this.value">'+
+        '<select class="cat-sel" style="flex:0 0 38%;width:auto;margin:4px" data-q="'+i+'" onchange="questions['+i+'].citems['+j+'].c=parseInt(this.value)">'+catOptions(q,it.c)+'</select>'+
+        '<button type="button" class="opt-mark" title="Quitar elemento" onclick="delItem('+i+',\'citems\','+j+',2)">✕</button></div>';});
+      if(q.citems.length<10)h+='<button type="button" class="btn ghost btn-sm" style="margin-top:6px" onclick="questions['+i+'].citems.push({t:\'\',c:0});renderBuilder()">＋ Elemento</button>';
+      h+='</div>';
     }
+    h+='<div class="field"><span class="field-label">💡 Explicación al revelar (opcional)</span><input maxlength="300" value="'+Q.esc(q.explain||'')+'" placeholder="Por qué es la respuesta correcta…" oninput="questions['+i+'].explain=this.value"></div>';
     h+='<div class="field"><span class="field-label">⏱ Tiempo (segundos)</span><input type="number" value="'+Q.esc(q.time)+'" min="5" max="120" style="max-width:140px" oninput="questions['+i+'].time=parseInt(this.value)||20"></div>';
     div.innerHTML=h; b.appendChild(div);
   });
   setupDnD();
+  questions.forEach((q,i)=>{ if(q.type==='cloze')clozeInfo(i); });
 }
+function catOptions(q,sel){ return q.categories.map((c,k)=>'<option value="'+k+'"'+(k===sel?' selected':'')+'>'+Q.esc(c.trim()||('Categoría '+(k+1)))+'</option>').join(''); }
+function refreshCatSelects(i){ const q=questions[i];
+  document.querySelectorAll('select.cat-sel[data-q="'+i+'"]').forEach((s,j)=>{ s.innerHTML=catOptions(q,q.citems[j].c); }); }
+function delItem(i,key,j,min){ const a=questions[i][key]; if(a.length<=min){ if(min===0)a.splice(j,1); else if(key==='pairs')a[j]=['','']; else if(key==='citems')a[j]={t:'',c:0}; else a[j]=''; } else a.splice(j,1); renderBuilder(); }
+function delCategory(i,k){ const q=questions[i]; if(q.categories.length<=2){alert('Se necesitan al menos 2 categorías');return;}
+  q.categories.splice(k,1); q.citems.forEach(it=>{ if(it.c===k)it.c=0; else if(it.c>k)it.c--; }); renderBuilder(); }
+function countBlanks(t){ return (String(t||'').match(/____/g)||[]).length; }
+function clozeInfo(i){ const q=questions[i], el=document.getElementById('czi'+i); if(!el)return;
+  const n=countBlanks(q.text), m=q.blanks.length, ok=n===m&&n>=1;
+  el.textContent=(ok?'✅ ':'⚠️ ')+'Huecos (____) en el texto: '+n+' · palabras de hueco: '+m+(ok?'':' — deben coincidir'); el.style.color=ok?'':'var(--red, #e5484d)'; }
+function insertBlank(i){ const q=questions[i]; q.text=(q.text||'')+(q.text&&!/\s$/.test(q.text)?' ':'')+'____'; renderBuilder(); }
 function toggleMulti(i,j){ const a=questions[i].answers||[]; const k=a.indexOf(j);
   if(k>=0)a.splice(k,1); else a.push(j); questions[i].answers=a; renderBuilder(); }
 
@@ -258,14 +314,40 @@ async function generateAI(){
   btn.disabled=false;
 }
 
+function validateQuestions(){
+  for(let i=0;i<questions.length;i++){ const q=questions[i], p='Pregunta '+(i+1)+': ';
+    if(q.type==='match'){
+      if(q.pairs.length<2||q.pairs.length>8)return p+'necesita entre 2 y 8 pares';
+      if(q.pairs.some(pr=>!pr[0].trim()||!pr[1].trim()))return p+'todos los pares deben tener los dos lados rellenos';
+    } else if(q.type==='cloze'){
+      const n=countBlanks(q.text);
+      if(q.blanks.length<1||q.blanks.some(b=>!b.trim()))return p+'rellena todas las palabras de hueco';
+      if(n!==q.blanks.length)return p+'el texto tiene '+n+' hueco(s) «____» pero hay '+q.blanks.length+' palabra(s); deben coincidir';
+      if(q.distractors.some(b=>!b.trim()))return p+'hay distractores vacíos (rellénalos o quítalos)';
+    } else if(q.type==='classify'){
+      if(q.categories.length<2||q.categories.some(c=>!c.trim()))return p+'rellena al menos 2 categorías (sin vacías)';
+      if(q.citems.length<2||q.citems.some(it=>!it.t.trim()))return p+'necesita al menos 2 elementos, todos con texto';
+      const seen=new Set(); for(const it of q.citems){ const k=it.t.trim(); if(seen.has(k))return p+'el elemento «'+k+'» está repetido'; seen.add(k); }
+    }
+  }
+  return null;
+}
+function cleanQuestions(){ return questions.map(q=>{ const o=JSON.parse(JSON.stringify(q));
+  if(!o.code||!o.code.trim())delete o.code; else o.code=o.code.slice(0,1500);
+  if(!o.explain||!o.explain.trim())delete o.explain; else o.explain=o.explain.slice(0,300);
+  if(o.type==='match')o.pairs=o.pairs.map(p=>[p[0].trim(),p[1].trim()]);
+  if(o.type==='cloze'){o.blanks=o.blanks.map(s=>s.trim());o.distractors=o.distractors.map(s=>s.trim());}
+  if(o.type==='classify'){o.categories=o.categories.map(s=>s.trim());o.citems=o.citems.map(it=>({t:it.t.trim(),c:it.c}));}
+  return o; }); }
 async function saveQuiz(){
   const title=document.getElementById('qTitle').value.trim();
   const theme=document.getElementById('qTheme').value.trim()||'General';
   const folder=document.getElementById('qFolder').value.trim()||'General';
   const msg=document.getElementById('saveMsg');
   if(!title||questions.length===0){msg.innerHTML='<div class="err">Pon un título y al menos una pregunta</div>';return;}
+  const verr=validateQuestions(); if(verr){msg.innerHTML='<div class="err"></div>'; msg.firstChild.textContent=verr; return;}
   const url=editingId?('/admin/quiz/'+editingId+'/update'):'/admin/quiz/new';
-  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,theme,folder,kind:'mixto',questions})});
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,theme,folder,kind:'mixto',questions:cleanQuestions()})});
   const d=await r.json(); if(d.ok)location.reload(); else msg.innerHTML='<div class="err">'+(d.error||'Error')+'</div>';
 }
 </script>

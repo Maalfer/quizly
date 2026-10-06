@@ -199,7 +199,10 @@ def init_db():
     c.execute("UPDATE results SET owner='admin' WHERE owner IS NULL OR owner=''")
     # Solo crea el admin por defecto si NO existe ningún administrador
     # (así, tras renombrar/cambiar el admin, un reinicio no recrea 'admin').
-    if not c.execute("SELECT id FROM users WHERE role='admin'").fetchone():
+    # QUIZLY_NO_DEFAULT_ADMIN=1 desactiva este alta automática (despliegues donde
+    # las cuentas se gestionan a mano y no debe reaparecer admin/admin).
+    if (os.environ.get("QUIZLY_NO_DEFAULT_ADMIN") != "1"
+            and not c.execute("SELECT id FROM users WHERE role='admin'").fetchone()):
         c.execute("INSERT INTO users (username, password, role) VALUES (?,?,?)",
                   ("admin", hash_pw("admin"), "admin"))
     if c.execute("SELECT COUNT(*) AS n FROM quizzes").fetchone()["n"] == 0:
@@ -367,6 +370,8 @@ class Player:
         self.streak = 0
         self.last_points = 0
         self.answered = False
+        self.last_frac = None     # fracción de acierto de la última pregunta (None = sin responder)
+        self._snap = None         # estado previo a puntuar (para poder editar la respuesta)
         self.boost = False        # power-up x2 armado para la pregunta actual
         self.boost_used = False
         self.ws: Optional[WebSocket] = None
@@ -398,6 +403,7 @@ class Room:
         self.q_started_at = 0.0
         self.lock = asyncio.Lock()
         self.timer_task: Optional[asyncio.Task] = None
+        self.grace_task: Optional[asyncio.Task] = None
         # opciones
         self.teams_on = False
         self.n_teams = 2
@@ -498,7 +504,11 @@ MAX_KIND = 50
 MAX_Q_TEXT = 500
 MAX_Q_OPTION = 100
 MAX_Q_OPTIONS = 8
-MAX_Q_ITEMS = 8
+MAX_Q_ITEMS = 10
+MAX_Q_CODE = 1500
+MAX_Q_EXPLAIN = 300
+MAX_Q_PAIRS = 8
+MAX_Q_CATS = 4
 MAX_Q_ANSWER = 200
 
 
@@ -604,6 +614,28 @@ def grade(q: dict, answer) -> float:
             if d > tol:
                 return 0.0
             return 1.0 - (d / tol) * 0.5
+        if t in ("match", "cloze"):
+            expected = [p[1] for p in q["pairs"]] if t == "match" else list(q.get("blanks", []))
+            arr = answer if isinstance(answer, list) else []
+            if not expected:
+                return 0.0
+            good = sum(1 for i, v in enumerate(arr[:len(expected)])
+                       if isinstance(v, str) and v.strip() == str(expected[i]).strip())
+            return good / len(expected)
+        if t == "classify":
+            truth = {}
+            for it in q.get("citems", []):
+                truth.setdefault(it["t"], int(it["c"]))
+            if not truth:
+                return 0.0
+            seen, good = set(), 0
+            for pair in (answer if isinstance(answer, list) else [])[:MAX_Q_ITEMS * 2]:
+                if (isinstance(pair, list) and len(pair) == 2 and isinstance(pair[0], str)
+                        and pair[0] in truth and pair[0] not in seen):
+                    seen.add(pair[0])
+                    if int(pair[1]) == truth[pair[0]]:
+                        good += 1
+            return good / len(truth)
         if t == "order":
             correct = q.get("items", [])
             arr = answer or []
@@ -622,6 +654,12 @@ def correct_repr(q: dict):
         return q.get("answers", [])
     if t == "order":
         return q.get("items", [])
+    if t == "match":
+        return q.get("pairs", [])
+    if t == "cloze":
+        return q.get("blanks", [])
+    if t == "classify":
+        return {"categories": q.get("categories", []), "citems": q.get("citems", [])}
     if t in ("choice", "truefalse"):
         return q.get("answer")
     return q.get("answer")
@@ -641,7 +679,8 @@ def player_question_payload(room: Room, q: dict) -> dict:
          # Defensa en profundidad: aunque _parse_quiz() ya sanea el campo al
          # guardar, quizzes legacy en la BD o un POST a la API v1 que evite el
          # parser podrían llevar URLs externas. clean_image() las descarta.
-         "image": clean_image(q.get("image", "")), "powerups": room.powerups}
+         "image": clean_image(q.get("image", "")), "powerups": room.powerups,
+         "code": q.get("code", "")}
     if q["type"] in ("choice", "multi"):
         p["options"] = q["options"]
     elif q["type"] == "truefalse":
@@ -653,6 +692,21 @@ def player_question_payload(room: Room, q: dict) -> dict:
         items = list(q["items"])
         random.shuffle(items)
         p["items"] = items
+    elif q["type"] == "match":
+        right = [pr[1] for pr in q["pairs"]]
+        random.shuffle(right)
+        p["left"] = [pr[0] for pr in q["pairs"]]
+        p["right"] = right
+    elif q["type"] == "cloze":
+        bank = list(q.get("blanks", [])) + list(q.get("distractors", []))
+        random.shuffle(bank)
+        p["bank"] = bank
+        p["n_blanks"] = len(q.get("blanks", []))
+    elif q["type"] == "classify":
+        items = [it["t"] for it in q.get("citems", [])]
+        random.shuffle(items)
+        p["items"] = items
+        p["categories"] = q.get("categories", [])
     return p
 
 
@@ -668,6 +722,8 @@ async def start_question(room: Room):
     for p in room.players.values():
         p.answered = False
         p.last_points = 0
+        p.last_frac = None
+        p._snap = None
     if len(room.stats) <= room.q_index:
         room.stats.append({"text": q["text"], "type": q["type"], "answered": 0, "correct": 0,
                            "dist": {}})
@@ -689,6 +745,8 @@ async def start_question(room: Room):
     hq["players_total"] = len(room.players)
     await room.send_host(hq)
 
+    if room.grace_task and not room.grace_task.done():
+        room.grace_task.cancel()
     if room.timer_task and not room.timer_task.done():
         room.timer_task.cancel()
     room.timer_task = asyncio.create_task(question_timer(room, room.q_index, tlimit))
@@ -704,18 +762,40 @@ async def question_timer(room: Room, q_index: int, tlimit: int):
         pass
 
 
+def _player_status(p: Player) -> str:
+    """ok = acierto total, partial = parcial, bad = fallo, none = sin responder."""
+    if p.last_frac is None:
+        return "none"
+    if p.last_frac >= 0.999:
+        return "ok"
+    return "partial" if p.last_frac > 0 else "bad"
+
+
+def results_payload(room: Room) -> List[dict]:
+    """Quién ha acertado/fallado en la pregunta que se acaba de revelar."""
+    order = {"ok": 0, "partial": 1, "bad": 2, "none": 3}
+    rows = [{"name": p.name, "avatar": p.avatar, "team": p.team, "status": _player_status(p),
+             "points": p.last_points} for p in room.players.values()]
+    rows.sort(key=lambda r: (order[r["status"]], -r["points"], r["name"]))
+    return rows
+
+
 async def reveal_question(room: Room):
     q = room.current_question
     if q is None:
         return
+    if room.grace_task and not room.grace_task.done() and room.grace_task is not asyncio.current_task():
+        room.grace_task.cancel()
     room.state = "reveal"
     full = room.scoreboard()
     rank_by = {x["name"]: i + 1 for i, x in enumerate(full)}
     n = len(full)
     has_next = room.q_index + 1 < len(room.quiz["questions"])
     correct = correct_repr(q)
+    explain = q.get("explain", "")
     for p in room.players.values():
         await _safe_send(p, {"type": "reveal", "correct": correct, "qtype": q["type"],
+                             "status": _player_status(p), "explain": explain,
                              "you_got": p.last_points, "score": p.score, "streak": p.streak,
                              "rank": rank_by.get(p.name, n), "players": n,
                              "has_next": has_next, "q_index": room.q_index + 1,
@@ -725,6 +805,8 @@ async def reveal_question(room: Room):
                           "answer_text": q.get("answer", "") if q["type"] in ("fill", "numeric") else "",
                           "correct_order": q.get("items", []) if q["type"] == "order" else [],
                           "options": q.get("options", []),
+                          "explain": explain,
+                          "results": results_payload(room),
                           "scoreboard": room.scoreboard(top=5),
                           "team_board": room.team_board(),
                           "dist": st.get("dist", {}),
@@ -740,11 +822,32 @@ async def _safe_send(p: Player, payload: dict):
             p.ws = None
 
 
+# Tipos en los que el alumno puede corregir su respuesta mientras dura la pregunta.
+EDITABLE_TYPES = ("fill", "numeric")
+# Con todos respondidos, estas preguntas esperan unos segundos por si alguien edita.
+EDIT_GRACE_SECONDS = 6
+
+
+async def _grace_reveal(room: Room, q_index: int):
+    try:
+        await asyncio.sleep(EDIT_GRACE_SECONDS)
+        async with room.lock:
+            if room.state == "question" and room.q_index == q_index:
+                if room.timer_task and not room.timer_task.done():
+                    room.timer_task.cancel()
+                await reveal_question(room)
+    except asyncio.CancelledError:
+        pass
+
+
 async def submit_answer(room: Room, player: Player, answer):
-    if room.state != "question" or player.answered:
+    if room.state != "question":
         return
     q = room.current_question
     if q is None:
+        return
+    editable = q["type"] in EDITABLE_TYPES
+    if player.answered and not editable:
         return
     # Defensa contra CPU-DoS en normalize() (sink O(N) sobre la cadena del
     # jugador). Un fill legítimo rara vez supera 50 chars; 200 es generoso.
@@ -752,10 +855,20 @@ async def submit_answer(room: Room, player: Player, answer):
     # CPU pasa a O(1) sobre el cap.
     if isinstance(answer, str) and len(answer) > MAX_ANSWER_LEN:
         answer = answer[:MAX_ANSWER_LEN]
+    st = room.stats[room.q_index]
+    edited = player.answered
+    if edited and player._snap is not None:
+        # Deshace el efecto de la respuesta anterior antes de puntuar la nueva.
+        snap = player._snap
+        if player.last_frac is not None and player.last_frac >= 0.999:
+            st["correct"] = max(0, st["correct"] - 1)
+        player.score, player.streak, player.boost = snap["score"], snap["streak"], snap["boost"]
+    else:
+        player._snap = {"score": player.score, "streak": player.streak, "boost": player.boost}
+        st["answered"] += 1
     player.answered = True
     frac = grade(q, answer)
-    st = room.stats[room.q_index]
-    st["answered"] += 1
+    player.last_frac = frac
     if q["type"] in ("choice", "truefalse") and answer is not None:
         key = str(answer)
         st["dist"][key] = st["dist"].get(key, 0) + 1
@@ -796,13 +909,20 @@ async def submit_answer(room: Room, player: Player, answer):
     boosted = player.boost
     player.boost = False
 
-    await _safe_send(player, {"type": "answer_ack", "received": True, "boosted": boosted})
+    await _safe_send(player, {"type": "answer_ack", "received": True, "boosted": boosted,
+                              "edited": edited, "editable": editable})
     answered = sum(1 for p in room.players.values() if p.answered)
     await room.send_host({"type": "progress", "answered": answered, "total": len(room.players)})
+    if room.grace_task and not room.grace_task.done():
+        room.grace_task.cancel()
     if answered >= len(room.players) and len(room.players) > 0:
-        if room.timer_task and not room.timer_task.done():
-            room.timer_task.cancel()
-        await reveal_question(room)
+        if editable:
+            # Da margen para corregir antes de cerrar la pregunta.
+            room.grace_task = asyncio.create_task(_grace_reveal(room, room.q_index))
+        else:
+            if room.timer_task and not room.timer_task.done():
+                room.timer_task.cancel()
+            await reveal_question(room)
 
 
 def csv_safe(value) -> str:
@@ -1139,6 +1259,52 @@ async def _read_json_body(request: Request, max_bytes: int = MAX_BODY) -> Option
     return data if isinstance(data, dict) else None
 
 
+def _clip(v, n=MAX_Q_OPTION) -> str:
+    return (v if isinstance(v, str) else str(v))[:n]
+
+
+def _sanitize_rich_question(q: dict):
+    """Acota los campos de los tipos match / cloze / classify."""
+    t = q.get("type")
+    if t == "match":
+        pairs = q.get("pairs")
+        q["pairs"] = [[_clip(a), _clip(b)] for a, b in
+                      (pr for pr in (pairs if isinstance(pairs, list) else [])[:MAX_Q_PAIRS]
+                       if isinstance(pr, (list, tuple)) and len(pr) == 2)]
+    elif t == "cloze":
+        for fld, cap in (("blanks", MAX_Q_PAIRS), ("distractors", 6)):
+            v = q.get(fld)
+            q[fld] = [_clip(x) for x in (v if isinstance(v, list) else [])[:cap]]
+    elif t == "classify":
+        cats = q.get("categories")
+        q["categories"] = [_clip(c) for c in (cats if isinstance(cats, list) else [])[:MAX_Q_CATS]]
+        out = []
+        for it in (q.get("citems") if isinstance(q.get("citems"), list) else [])[:MAX_Q_ITEMS]:
+            if isinstance(it, dict):
+                try:
+                    out.append({"t": _clip(it.get("t", "")), "c": int(it.get("c", 0))})
+                except (TypeError, ValueError):
+                    pass
+        q["citems"] = out
+
+
+def _question_ok(q: dict) -> bool:
+    """Descarta preguntas de los tipos nuevos con estructura inválida
+    (evita que una pregunta mal formada rompa la sala en directo)."""
+    t = q.get("type")
+    if t == "match":
+        return 2 <= len(q.get("pairs", [])) <= MAX_Q_PAIRS and all(a and b for a, b in q["pairs"])
+    if t == "cloze":
+        n = len(q.get("blanks", []))
+        return 1 <= n and all(q["blanks"]) and isinstance(q.get("text"), str) and q["text"].count("____") == n
+    if t == "classify":
+        cats, items = q.get("categories", []), q.get("citems", [])
+        return (2 <= len(cats) and len(items) >= 2 and all(it["t"] for it in items)
+                and all(0 <= it["c"] < len(cats) for it in items)
+                and len({it["t"] for it in items}) == len(items))
+    return True
+
+
 def _parse_quiz(data):
     if not isinstance(data, dict):
         return ("", "General", "mixto", "General", [])
@@ -1187,6 +1353,14 @@ def _parse_quiz(data):
         # almacene una URL externa o un data: malicioso que se sirva luego a
         # todos los alumnos en el img.src de la pregunta (tracking / XSS).
         q["image"] = clean_image(q.get("image", ""))
+        # Campos de contenido enriquecido (bloque de código y explicación).
+        for fld, cap in (("code", MAX_Q_CODE), ("explain", MAX_Q_EXPLAIN)):
+            if isinstance(q.get(fld), str):
+                q[fld] = q[fld][:cap]
+            else:
+                q.pop(fld, None)
+        _sanitize_rich_question(q)
+    questions = [q for q in questions if isinstance(q, dict) and _question_ok(q)]
     # Defensa final: tamaño total del quiz serializado. Aunque cada campo
     # esté acotado, N preguntas x campos al tope aún podrían sumar varios MB
     # que se re-parsean en cada visita de /admin.
@@ -1355,6 +1529,10 @@ def _claude_generate(topic: str, n: int, qtype: str) -> dict:
         "multi": '{"type":"multi","text":"...","options":["a","b","c","d"],"answers":[<indices correctos>],"time":25}',
         "fill": '{"type":"fill","text":"frase con ____","answer":"palabra","time":20}',
         "numeric": '{"type":"numeric","text":"...","answer":<numero>,"tol":1,"min":0,"max":100,"time":20}',
+        "order": '{"type":"order","text":"...","items":["primero","segundo","tercero"],"time":25}',
+        "match": '{"type":"match","text":"...","pairs":[["izquierda1","derecha1"],["izquierda2","derecha2"]],"time":30}',
+        "cloze": '{"type":"cloze","text":"texto con ____ huecos ____","blanks":["palabra1","palabra2"],"distractors":["falsa1"],"time":30}',
+        "classify": '{"type":"classify","text":"...","categories":["A","B"],"citems":[{"t":"elemento","c":<indice categoria>}],"time":35}',
     }
     if qtype == "mixto":
         ej = "Mezcla los tipos. Cada objeto sigue uno de estos formatos:\n" + "\n".join(schema.values())
@@ -1758,7 +1936,17 @@ QUESTION_SCHEMA = {
                 "tol": "tolerancia +/-", "min": 0, "max": 100, "time": 20},
     "order": {"type": "order", "text": "enunciado", "items": ["primero", "segundo", "tercero"],
               "time": 25, "note": "items en el ORDEN CORRECTO; se muestran barajados"},
+    "match": {"type": "match", "text": "enunciado", "pairs": [["izq1", "der1"], ["izq2", "der2"]],
+              "time": 30, "note": "2-8 pares; las columnas derechas se muestran barajadas"},
+    "cloze": {"type": "cloze", "text": "texto con ____ huecos", "blanks": ["palabra"],
+              "distractors": ["(opcional) palabras falsas"], "time": 30,
+              "note": "el nº de '____' del texto debe coincidir con len(blanks); los alumnos arrastran palabras a los huecos"},
+    "classify": {"type": "classify", "text": "enunciado", "categories": ["A", "B"],
+                 "citems": [{"t": "elemento", "c": "indice de su categoria"}], "time": 35,
+                 "note": "los alumnos arrastran cada elemento a su categoria (2-4 categorias)"},
 }
+# Campos opcionales aplicables a cualquier tipo: "code" (bloque de codigo mostrado
+# bajo el enunciado, max 1500 car.) y "explain" (explicacion tras revelar, max 300).
 
 
 def token_owner(request: Request) -> Optional[dict]:

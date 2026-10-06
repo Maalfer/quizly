@@ -404,6 +404,7 @@ class Room:
         self.lock = asyncio.Lock()
         self.timer_task: Optional[asyncio.Task] = None
         self.grace_task: Optional[asyncio.Task] = None
+        self.host_last: Dict[str, dict] = {}   # último host_question / host_reveal / host_end (resync del host)
         # opciones
         self.teams_on = False
         self.n_teams = 2
@@ -415,6 +416,13 @@ class Room:
         self.started_at = ""
 
     async def send_host(self, payload: dict):
+        t = payload.get("type")
+        if t == "host_question":
+            self.host_last = {"question": payload}
+        elif t == "host_reveal":
+            self.host_last["reveal"] = payload
+        elif t == "host_end":
+            self.host_last["end"] = payload
         if self.host_ws:
             try:
                 await self.host_ws.send_json(payload)
@@ -2472,10 +2480,36 @@ async def ws_host(ws: WebSocket, code: str):
     room.host_ws = ws
     await ws.send_json({"type": "connected", "code": code})
     await ws.send_json(room.lobby_payload())
+    # Resincroniza al profesor si recarga la página o reconecta a media partida:
+    # sin esto vuelve a un lobby vacío mientras la partida sigue en marcha.
+    try:
+        if room.quiz:
+            await ws.send_json({"type": "quiz_loaded", "title": room.quiz["title"],
+                                "n": len(room.quiz["questions"])})
+        last = room.host_last
+        if room.state == "question" and last.get("question"):
+            hq = dict(last["question"])
+            q = room.current_question
+            hq["time"] = max(1, int(q.get("time", 20)) - int(time.time() - room.q_started_at)) if q else hq.get("time", 1)
+            hq["players_total"] = len(room.players)
+            await ws.send_json(hq)
+            await ws.send_json({"type": "progress",
+                                "answered": sum(1 for p in room.players.values() if p.answered),
+                                "total": len(room.players)})
+        elif room.state == "reveal" and last.get("question") and last.get("reveal"):
+            await ws.send_json(last["question"])
+            await ws.send_json(last["reveal"])
+        elif room.state == "ended" and last.get("end"):
+            await ws.send_json(last["end"])
+    except Exception:
+        pass
     try:
         while True:
             msg = await ws.receive_json()
             action = msg.get("action")
+            if action == "ping":
+                await ws.send_json({"type": "pong"})
+                continue
             async with room.lock:
                 if action == "config":
                     if room.state == "lobby":
@@ -2523,9 +2557,13 @@ async def ws_host(ws: WebSocket, code: str):
                     await ws.send_json(room.lobby_payload())
                     await room.broadcast_players(room.lobby_payload())
     except WebSocketDisconnect:
-        room.host_ws = None
+        # Solo se limpia si sigue siendo ESTE socket: si el host ya reconectó,
+        # el cierre tardío del socket viejo no debe borrar el nuevo.
+        if room.host_ws is ws:
+            room.host_ws = None
     except Exception:
-        room.host_ws = None
+        if room.host_ws is ws:
+            room.host_ws = None
 
 
 @app.websocket("/ws/play/{code}")
@@ -2652,11 +2690,15 @@ async def ws_play(ws: WebSocket, code: str):
             elif action == "ping":
                 await ws.send_json({"type": "pong"})
     except WebSocketDisconnect:
-        player.ws = None
-        if room.state == "lobby":
+        # Igual que en el host: un cierre tardío del socket viejo no debe
+        # desconectar la conexión nueva del jugador que ya reconectó.
+        if player.ws is ws:
+            player.ws = None
+        if room.state == "lobby" and player.ws is None:
             async with room.lock:
                 room.players.pop(pid, None)
                 await room.send_host(room.lobby_payload())
                 await room.broadcast_players(room.lobby_payload())
     except Exception:
-        player.ws = None
+        if player.ws is ws:
+            player.ws = None

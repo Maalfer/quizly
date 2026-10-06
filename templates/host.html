@@ -13,6 +13,7 @@
 <script src="/static/qrcode.min.js?v=1"></script>
 </head>
 <body>
+<div id="connBanner" role="alert" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9998;background:#b91c1c;color:#fff;text-align:center;padding:8px;font-weight:700">⚠️ Sin conexión con el servidor… reconectando (no se pierde la partida)</div>
 <div class="topbar wrap">
   <a href="/" class="brand"><picture><source srcset="/static/logo_60.webp 1x, /static/logo.webp 2x" type="image/webp"><img src="/static/logo_120.png" class="brand-logo" alt="Quizly"></picture> <span class="bname">Quiz<span style="color:var(--yellow)">ly</span></span></a>
   <div class="row" style="align-items:center">
@@ -153,10 +154,18 @@ function sendConfig(){ send({action:'config',teams_on:document.getElementById('c
   powerups:document.getElementById('cfgPower').checked}); }
 function doStart(){ Q.resume(); Q.sfx.start(); send({action:'start'}); }
 
-let ws,tInt;
-function connect(){ ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws/host/'+CODE);
-  ws.onmessage=ev=>handle(JSON.parse(ev.data)); ws.onclose=()=>setTimeout(connect,1500); }
-function send(o){ if(ws&&ws.readyState===1)ws.send(JSON.stringify(o)); }
+let ws,tInt,lastMsg=Date.now();
+// Conexión del profesor: latido cada 20 s (evita cortes por inactividad en proxys),
+// vigilante que reconecta si deja de llegar tráfico y aviso visible al caer.
+// Al reconectar, el servidor reenvía el estado actual (pregunta/reveal/final).
+function connect(){ const w=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws/host/'+CODE); ws=w;
+  w.onopen=()=>{ lastMsg=Date.now(); document.getElementById('connBanner').style.display='none'; };
+  w.onmessage=ev=>{ lastMsg=Date.now(); handle(JSON.parse(ev.data)); };
+  w.onclose=()=>{ if(ws===w){ document.getElementById('connBanner').style.display='block'; setTimeout(connect,1500); } }; }
+function send(o){ if(ws&&ws.readyState===1){ws.send(JSON.stringify(o));return true;}
+  document.getElementById('connBanner').style.display='block'; return false; }
+setInterval(()=>{ if(ws&&ws.readyState===1)ws.send(JSON.stringify({action:'ping'})); },20000);
+setInterval(()=>{ if(ws&&ws.readyState===1&&Date.now()-lastMsg>50000){ try{ws.close();}catch(e){} } },5000);
 function loadQuiz(){ send({action:'load_quiz',quiz_id:parseInt(document.getElementById('quizSel').value)}); }
 function nextOrEnd(){ hasNext?send({action:'next'}):send({action:'end'}); }
 
@@ -273,7 +282,10 @@ function renderBoard(id,board,results){ const medals=['🥇','🥈','🥉'];
   document.getElementById(id).innerHTML=board.map((p,i)=>'<li><span class="pos">'+(medals[i]||(i+1))+'</span>'+Q.avatarHtml(p.avatar,'av2')+
     '<span class="nm">'+(st[p.name]?'<span class="mark" title="'+ST_TITLE[st[p.name]]+'">'+ST_MARK[st[p.name]]+'</span>':'')+Q.esc(p.name)+(p.team?' <span class="team-badge">'+p.team+'</span>':'')+(p.streak>1?' 🔥'+p.streak:'')+'</span><span class="sc">'+p.score+'</span></li>').join(''); }
 function runTimer(sec){ const bar=document.getElementById('tbar'); bar.style.transition='none'; bar.style.width='100%';
-  requestAnimationFrame(()=>{bar.style.transition='width '+sec+'s linear';bar.style.width='0%';}); clearInterval(tInt); }
+  requestAnimationFrame(()=>{bar.style.transition='width '+sec+'s linear';bar.style.width='0%';}); clearInterval(tInt);
+  // Cuenta atrás numérica (antes solo se animaba la barra y el número se quedaba fijo).
+  const end=Date.now()+sec*1000, el=document.getElementById('qTime'); el.textContent=sec;
+  tInt=setInterval(()=>{ const left=Math.max(0,Math.ceil((end-Date.now())/1000)); el.textContent=left; if(left<=0)clearInterval(tInt); },250); }
 connect();
 </script>
 </body>
